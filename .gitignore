@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.manifest
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Models (large files)
+_models/
+*.onnx
+*.ckpt
+*.bin
+*.pt
+
+# Temp files
+*.tmp
+*.bak
+
+# Test files
+make_test_audio.py
+test.wav
+test_speech.wav
+test_speech.srt

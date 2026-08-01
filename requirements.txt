@@ -1,0 +1,8 @@
+torch==2.8.0
+torchaudio==2.8.0
+faster-whisper>=1.1.1
+audio-separator>=0.44.0
+silero-vad>=5.1.0
+stable-ts>=2.16.0
+ffmpeg-python==0.2.0
+tqdm>=4.65.0
