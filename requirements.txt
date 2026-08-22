@@ -1,8 +1,17 @@
 torch==2.8.0
 torchaudio==2.8.0
-faster-whisper>=1.1.1
+# 1.2.1 以降は内蔵VADが silero v6 になる。README/HANDOVER はこれを前提にしている。
+faster-whisper>=1.2.1
+# transformers 形式のモデル（-m anime-whisper 等）を CTranslate2 に変換するときだけ
+# 必要。変換は初回のみで、変換済みモデルを使う場合は無くても動く。
+# ctranslate2 4.8 系のコンバータは from_pretrained に dtype= を渡すため 4.56 以上。
+# 5.15.0 / safetensors 0.8.0 で動作確認。
+transformers>=4.56
+safetensors>=0.4
 audio-separator>=0.44.0
 silero-vad>=5.1.0
 stable-ts>=2.16.0
 ffmpeg-python==0.2.0
 tqdm>=4.65.0
+# 設定ファイル（whisp-carrier.yaml）の読み込み用。6.0.3 で動作確認。
+PyYAML>=6.0,<7

@@ -1,0 +1,101 @@
+ffmpeg 同梱バイナリの出所と検証記録
+====================================
+
+このフォルダは exe ビルド時に同梱する ffmpeg を置く場所。バイナリ自体は
+.gitignore で除外してあるので、「何を入れたのか」はこのファイルだけが記録になる。
+差し替えたら必ず書き換えること。
+
+whisp_carrier.spec の FFMPEG_KNOWN_SHA256 は下の ffmpeg.exe の値と同じものを持つ。
+片方だけ更新すると spec がビルド時に警告を出す。
+
+
+現在同梱しているもの
+--------------------
+
+配布元    BtbN/FFmpeg-Builds （GitHub Actions の自動ビルド）
+          https://github.com/BtbN/FFmpeg-Builds
+リリース  タグ latest / "Latest Auto-Build (2026-08-20 13:45)"
+          published_at 2026-08-20T14:10:05Z
+アセット  ffmpeg-n8.1-latest-win64-lgpl-8.1.zip （asset id 522339038）
+取得日    2026-08-20
+
+バージョン
+  ffmpeg version n8.1.2-44-g7c533d0f86-20260820
+  built with gcc 15.2.0 (crosstool-NG 1.28.0.23_185f348)
+
+ライセンス
+  LGPL v3 以降。configure に --enable-version3 はあるが
+  --enable-gpl と --enable-nonfree は無い。GPL 側のコンポーネントは
+  明示的に無効化されている（--disable-libx264 --disable-libx265
+  --disable-libxvid --disable-libxavs2 --disable-libdavs2
+  --disable-librubberband --disable-libvidstab --disable-frei0r
+  --disable-libfdk-aac --disable-avisynth）。
+  ライセンス文は official/LICENSE.txt。exe の隣に LICENSE.ffmpeg.txt として配る。
+
+
+SHA-256
+-------
+
+ffmpeg-n8.1-latest-win64-lgpl-8.1.zip   146,077,629 bytes
+  0d014a3f6a0892a821a5a50e1ed8dcb3ae676a0058d1cfdba84b628372fbbd5a
+
+official/ffmpeg.exe                     113,981,440 bytes
+  8ee152edc79f7ba99969b7fb590cfde438b46cb383952dec87e754db83788572
+
+official/ffprobe.exe                    113,775,104 bytes
+  a0224bcacad15bf602d85f9147718b86597c3abcde61610be5b26bf38e0b9527
+
+official/LICENSE.txt                          7,651 bytes
+  da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768
+
+ffprobe.exe はまだどこからも呼んでいない（既知の問題 2-a のチャンネル
+レイアウト検査で要る）。取り出してあるだけで spec は同梱していない。
+
+
+zip のハッシュ検証（3系統で照合）
+----------------------------------
+
+latest タグはローリングリリースで、同じファイル名のまま中身が差し替わる。
+ファイル名では何も保証されないので、独立な3経路で同じ値を確認した。
+
+1. ローカル実測（Get-FileHash -Algorithm SHA256）
+     0D014A3F...BBD5A
+
+2. 配布元が公開しているチェックサムファイル
+     https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256
+     該当行:
+       0d014a3f6a0892a821a5a50e1ed8dcb3ae676a0058d1cfdba84b628372fbbd5a  ffmpeg-n8.1-latest-win64-lgpl-8.1.zip
+     （このファイルのコピーを checksums.sha256 として置いてある）
+
+3. GitHub Releases API のアセットメタデータ
+     https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest
+     "digest": "sha256:0d014a3f...bbd5a" / "size": 146077629
+
+3つとも一致。サイズも一致。
+
+
+「公式」の意味
+--------------
+
+FFmpeg プロジェクト（ffmpeg.org）は Windows バイナリを自前で配布していない。
+Download ページはサードパーティのビルド提供者を案内する形で、BtbN はその一つ。
+つまりこれは
+
+  FFmpeg プロジェクト自身が署名して出したバイナリ ではなく、
+  FFmpeg プロジェクトが案内している信頼できるビルド提供者のバイナリ
+
+である。Windows で入手できる中で最も素性が明らかなものではあるが、上流の署名に
+よる保証があるわけではない。だから配布元の公開ハッシュとの照合を記録に残している。
+
+
+
+差し替えるとき
+--------------
+
+1. https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest を開く
+2. ファイル名に -lgpl が入っているものを選ぶ（-gpl は使えない）
+3. checksums.sha256 も落として zip のハッシュを照合する
+4. bin/ffmpeg.exe と LICENSE.txt を official/ に展開する
+5. ffmpeg.exe の SHA-256 を spec の FFMPEG_KNOWN_SHA256 に反映する
+6. このファイルのバージョン・日付・ハッシュを更新する
+7. ビルドして [spec] ffmpeg verified が出ることを確認する

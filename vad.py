@@ -1,16 +1,35 @@
 """
 vad.py
-Voice Activity Detection methods for whisp-carier.
+Voice Activity Detection methods for whisp-carrier.
 Supports: silero_v4_fw, silero_v5_fw, silero_v3, silero_v4, silero_v5,
           pyannote_onnx_v3, auditok, webrtc
 """
 
 from __future__ import annotations
 import os
-from typing import List, Tuple
+import sys
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 # Segment = (start_sec, end_sec)
 Segment = Tuple[float, float]
+
+
+def _frozen() -> bool:
+    """True when running from a PyInstaller build."""
+    return getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+
+
+def _missing_backend(method: str, package: str, pip_name: str) -> ImportError:
+    """Error for an unavailable VAD backend, worded for the current run mode."""
+    if _frozen():
+        return ImportError(
+            f"--vad_method {method} is not available in this exe build "
+            f"({package} is not bundled). Use the built-in silero VAD "
+            f"(--vad_method silero_v5_fw), or run the script version with "
+            f"{package} installed."
+        )
+    return ImportError(f"{package} not installed. Run: pip install {pip_name}")
 
 
 def get_speech_segments_silero(
@@ -22,10 +41,23 @@ def get_speech_segments_silero(
     speech_pad_ms: int = 900,
     window_size: int = 1536,
     device: str = "cpu",
+    neg_threshold: Optional[float] = None,
 ) -> List[Segment]:
-    """Silero VAD - supports v3, v4, v5, v4_fw, v5_fw, v6, v6_fw variants."""
+    """Silero VAD - supports v3, v4, v5, v4_fw, v5_fw, v6, v6_fw variants.
+
+    neg_threshold is the hysteresis silero uses to decide a speech run has
+    *ended*: the probability has to fall below it, not merely below `threshold`.
+    Left at None silero derives it as max(threshold - 0.15, 0.01), so the
+    default configuration runs 0.45/0.30. Lowering it makes the VAD hold on
+    through a quiet passage instead of cutting there, which is the one knob
+    between "keep the VAD" and "switch it off" (HANDOVER 測定結果 #17).
+    """
     import torch
     import torchaudio
+
+    # Only forwarded when set, so a silero build whose get_speech_timestamps
+    # predates the argument keeps working. None is silero's own default anyway.
+    neg_kwargs = {} if neg_threshold is None else {"neg_threshold": neg_threshold}
 
     # v6系はsilero-vad 6.x パッケージを直接使う
     v6_versions = {"silero_v6", "silero_v6_fw"}
@@ -67,6 +99,7 @@ def get_speech_segments_silero(
                 min_silence_duration_ms=min_silence_ms,
                 speech_pad_ms=speech_pad_ms,
                 return_seconds=True,
+                **neg_kwargs,
             )
             return [(t["start"], t["end"]) for t in timestamps]
         except Exception as e:
@@ -132,6 +165,7 @@ def get_speech_segments_silero(
             speech_pad_ms=speech_pad_ms,
             window_size_samples=window_size,
             return_seconds=True,
+            **neg_kwargs,
         )
     else:
         timestamps = gst(
@@ -141,9 +175,245 @@ def get_speech_segments_silero(
             min_silence_duration_ms=min_silence_ms,
             speech_pad_ms=speech_pad_ms,
             return_seconds=True,
+            **neg_kwargs,
         )
 
     return [(t["start"], t["end"]) for t in timestamps]
+
+
+def _load_wav_16k_mono(audio_path: str):
+    """16 kHz mono float32 waveform, decoding through ffmpeg when needed.
+
+    Only used by the TEN backend. The silero paths keep their own copy of this
+    so that adding a backend cannot perturb the recorded measurements.
+    """
+    import subprocess
+    import tempfile
+    import torchaudio
+
+    work_path = audio_path
+    tmp_wav = None
+    if not audio_path.lower().endswith(".wav"):
+        tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        subprocess.run([
+            "ffmpeg", "-y", "-i", audio_path,
+            "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav
+        ], capture_output=True, check=True)
+        work_path = tmp_wav
+
+    waveform, sr = torchaudio.load(work_path)
+    if tmp_wav:
+        try:
+            os.unlink(tmp_wav)
+        except OSError:
+            pass
+    if sr != 16000:
+        waveform = torchaudio.functional.resample(waveform, sr, 16000)
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    return waveform.squeeze().cpu().numpy()
+
+
+def segments_from_probabilities(
+    probabilities,
+    frame_samples: int,
+    total_samples: int,
+    threshold: float = 0.45,
+    neg_threshold: Optional[float] = None,
+    min_speech_ms: int = 250,
+    min_silence_ms: int = 3000,
+    speech_pad_ms: int = 900,
+    sampling_rate: int = 16000,
+) -> List[Segment]:
+    """Turn a frame-level speech probability track into segments.
+
+    This is silero's own aggregation, reimplemented so that a different model
+    can be compared against it without the comparison measuring the difference
+    in post-processing instead of the difference in the models. Same trigger,
+    same hysteresis, same minimum-silence confirmation, same minimum-speech
+    filter, and the same padding rule that splits a gap narrower than twice the
+    padding rather than letting the two segments overlap.
+
+    Kept separate from get_speech_segments_silero(), which still calls the
+    silero package, so the recorded numbers cannot move.
+    """
+    if neg_threshold is None:
+        neg_threshold = max(threshold - 0.15, 0.01)
+    min_speech_samples = sampling_rate * min_speech_ms // 1000
+    min_silence_samples = sampling_rate * min_silence_ms // 1000
+    pad_samples = sampling_rate * speech_pad_ms // 1000
+
+    speeches: List[dict] = []
+    current: dict = {}
+    triggered = False
+    temp_end = 0
+
+    for index, probability in enumerate(probabilities):
+        position = frame_samples * index
+        if probability >= threshold and temp_end:
+            temp_end = 0
+        if probability >= threshold and not triggered:
+            triggered = True
+            current = {"start": position}
+            continue
+        if probability < neg_threshold and triggered:
+            if not temp_end:
+                temp_end = position
+            if position - temp_end < min_silence_samples:
+                continue
+            current["end"] = temp_end
+            if current["end"] - current["start"] > min_speech_samples:
+                speeches.append(current)
+            current = {}
+            temp_end = 0
+            triggered = False
+
+    if triggered and current:
+        current["end"] = total_samples
+        if current["end"] - current["start"] > min_speech_samples:
+            speeches.append(current)
+
+    # Padding, as silero applies it: halve a gap that is narrower than twice the
+    # padding so the result stays non-overlapping.
+    for index, speech in enumerate(speeches):
+        if index == 0:
+            speech["start"] = max(0, speech["start"] - pad_samples)
+        if index != len(speeches) - 1:
+            gap = speeches[index + 1]["start"] - speech["end"]
+            if gap < 2 * pad_samples:
+                speech["end"] += gap // 2
+                speeches[index + 1]["start"] = max(0, speeches[index + 1]["start"] - gap // 2)
+            else:
+                speech["end"] = min(total_samples, speech["end"] + pad_samples)
+                speeches[index + 1]["start"] = max(0, speeches[index + 1]["start"] - pad_samples)
+        else:
+            speech["end"] = min(total_samples, speech["end"] + pad_samples)
+
+    return [(s["start"] / sampling_rate, s["end"] / sampling_rate) for s in speeches]
+
+
+def get_speech_segments_ten(
+    audio_path: str,
+    threshold: float = 0.45,
+    min_speech_ms: int = 250,
+    min_silence_ms: int = 3000,
+    speech_pad_ms: int = 900,
+    neg_threshold: Optional[float] = None,
+    return_probabilities: bool = False,
+):
+    """TEN VAD (TEN Framework, Apache-2.0).
+
+    A different model family from silero, which is the point: HANDOVER 測定結果
+    #17 established that the speech this project misses on 死亡遊戯 sits below
+    silero's probability floor, so no silero-side parameter can reach it. TEN VAD
+    reports its own frame probability, and the aggregation above is silero's, so
+    the only thing that differs is the model.
+
+    The package ships a prebuilt native library and exposes a frame-level API
+    (16 ms hops at 16 kHz), so segment building has to happen here.
+    """
+    try:
+        from ten_vad import TenVad
+    except ImportError:
+        raise _missing_backend("ten", "ten-vad", "ten-vad")
+
+    import numpy as np
+
+    audio = _load_wav_16k_mono(audio_path)
+    total_samples = int(audio.shape[0])
+    pcm = np.clip(audio * 32768.0, -32768, 32767).astype(np.int16)
+
+    hop = 256
+    # The handler carries state across frames, so the threshold given here only
+    # affects the flag we ignore; segmentation uses the probability track.
+    detector = TenVad(hop_size=hop, threshold=threshold)
+    frames = total_samples // hop
+    probabilities = np.empty(frames, dtype=np.float32)
+    for index in range(frames):
+        chunk = pcm[index * hop:(index + 1) * hop]
+        probabilities[index], _ = detector.process(chunk)
+
+    segments = segments_from_probabilities(
+        probabilities,
+        frame_samples=hop,
+        total_samples=total_samples,
+        threshold=threshold,
+        neg_threshold=neg_threshold,
+        min_speech_ms=min_speech_ms,
+        min_silence_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+    )
+    if return_probabilities:
+        return segments, probabilities
+    return segments
+
+
+def get_speech_segments_precomputed(
+    audio_path: str,
+    segments_path: str,
+    threshold: float = 0.45,
+    min_speech_ms: int = 250,
+    min_silence_ms: int = 3000,
+    speech_pad_ms: int = 900,
+    neg_threshold: Optional[float] = None,
+    frame_samples: int = 256,
+) -> List[Segment]:
+    """Speech regions produced elsewhere, put through the same aggregation.
+
+    Some segmenters cannot be installed alongside this project: inaSpeechSegmenter
+    wants tensorflow[and-cuda] plus onnxruntime-gpu, and funasr-onnx pins
+    numpy<=1.26.4, either of which would disturb the environment every recorded
+    number was measured in. So they run in their own virtualenv, write their
+    regions to JSON, and this reads them back.
+
+    The regions are rasterised onto the same 16 ms frame grid the TEN backend
+    uses and pushed through segments_from_probabilities(), so min_silence,
+    speech_pad and min_speech apply identically no matter which model decided
+    which frames are speech. Without that, a comparison would be measuring each
+    project's smoothing choices rather than its detection.
+
+    JSON shape: {"<wav stem>": [[start_seconds, end_seconds], ...], ...}
+    """
+    import json
+
+    import numpy as np
+
+    path = Path(segments_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"--vad_segments_json not found: {path}")
+    table = json.loads(path.read_text(encoding="utf-8"))
+
+    stem = Path(audio_path).stem
+    if stem not in table:
+        raise KeyError(
+            f"{path.name} has no entry for {stem!r}; "
+            f"it holds {len(table)} entr(ies)"
+        )
+    regions = table[stem]
+
+    audio = _load_wav_16k_mono(audio_path)
+    total_samples = int(audio.shape[0])
+    frames = total_samples // frame_samples
+    # 1.0 inside a region, 0.0 outside. Any threshold below 1 and above 0 gives
+    # the same trigger on this track, so the caller's --vad_threshold does not
+    # silently change what the external model decided.
+    track = np.zeros(frames, dtype=np.float32)
+    for start, end in regions:
+        first = max(0, int(float(start) * 16000) // frame_samples)
+        last = min(frames, int(float(end) * 16000) // frame_samples + 1)
+        if last > first:
+            track[first:last] = 1.0
+
+    return segments_from_probabilities(
+        track,
+        frame_samples=frame_samples,
+        total_samples=total_samples,
+        threshold=0.5,
+        neg_threshold=0.5,
+        min_speech_ms=min_speech_ms,
+        min_silence_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+    )
 
 
 def get_speech_segments_pyannote(
@@ -152,15 +422,21 @@ def get_speech_segments_pyannote(
     use_onnx: bool = True,
 ) -> List[Segment]:
     """Pyannote VAD v3 (onnx or torch)."""
+    # pyannote.audio is deliberately excluded from exe builds: it pulls in
+    # pytorch-lightning and speechbrain for a backend that tested worse than
+    # the built-in silero VAD.
+    try:
+        from pyannote.audio import Pipeline as _P
+    except ImportError:
+        raise _missing_backend("pyannote_v3", "pyannote.audio", "pyannote.audio")
+
     if use_onnx:
         # Use pyannote's built-in ONNX pipeline
-        from pyannote.audio import Pipeline as _P
         pipeline = _P.from_pretrained(
             "pyannote/voice-activity-detection",
             use_auth_token=False,
         )
     else:
-        from pyannote.audio import Pipeline as _P
         pipeline = _P.from_pretrained("pyannote/voice-activity-detection")
 
     import torch
@@ -180,7 +456,7 @@ def get_speech_segments_auditok(
     try:
         import auditok
     except ImportError:
-        raise ImportError("auditok not installed. Run: pip install auditok")
+        raise _missing_backend("auditok", "auditok", "auditok")
 
     energy_threshold = 50 + threshold * 10  # rough mapping
     regions = auditok.split(
@@ -211,7 +487,7 @@ def get_speech_segments_webrtc(
         import wave
         import struct
     except ImportError:
-        raise ImportError("webrtcvad not installed. Run: pip install webrtcvad-wheels")
+        raise _missing_backend("webrtc", "webrtcvad", "webrtcvad-wheels")
 
     aggressiveness = min(3, int(threshold * 4))
     vad = webrtcvad.Vad(aggressiveness)
@@ -281,12 +557,40 @@ def get_speech_segments(
     speech_pad_ms: int = 900,
     window_size: int = 1536,
     vad_device: str = "cpu",
+    neg_threshold: Optional[float] = None,
+    segments_json: Optional[str] = None,
 ) -> List[Segment]:
-    """Unified VAD dispatcher."""
+    """Unified VAD dispatcher.
+
+    neg_threshold only reaches the silero and TEN backends. auditok maps
+    `threshold` to an energy level and webrtc to an aggressiveness step, so
+    neither has a separate end-of-speech test to set.
+    """
 
     silero_methods = {"silero_v3", "silero_v4", "silero_v5", "silero_v4_fw", "silero_v5_fw", "silero_v6", "silero_v6_fw"}
 
-    if method in silero_methods:
+    if method == "precomputed":
+        if not segments_json:
+            raise ValueError(
+                "--vad_method precomputed needs --vad_segments_json PATH"
+            )
+        segments = get_speech_segments_precomputed(
+            audio_path,
+            segments_path=segments_json,
+            min_speech_ms=min_speech_ms,
+            min_silence_ms=min_silence_ms,
+            speech_pad_ms=speech_pad_ms,
+        )
+    elif method == "ten":
+        segments = get_speech_segments_ten(
+            audio_path,
+            threshold=threshold,
+            min_speech_ms=min_speech_ms,
+            min_silence_ms=min_silence_ms,
+            speech_pad_ms=speech_pad_ms,
+            neg_threshold=neg_threshold,
+        )
+    elif method in silero_methods:
         segments = get_speech_segments_silero(
             audio_path,
             version=method,
@@ -296,6 +600,7 @@ def get_speech_segments(
             speech_pad_ms=speech_pad_ms,
             window_size=window_size,
             device=vad_device,
+            neg_threshold=neg_threshold,
         )
     elif method in {"pyannote_v3", "pyannote_onnx_v3"}:
         use_onnx = (method == "pyannote_onnx_v3")

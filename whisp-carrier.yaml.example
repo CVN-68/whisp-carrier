@@ -1,0 +1,206 @@
+# ============================================================
+# whisp-carrier 設定ファイル（サンプル）
+# ============================================================
+#
+# 使い方
+#   このファイルを whisp-carrier.yaml にリネームして、
+#   whisp_carrier.py（exe 版なら whisp-carrier.exe）と同じフォルダに置く。
+#   ファイル名が .example のままだと読み込まれない。
+#
+#   別の場所のファイルを使う   : --config path\to\my.yaml
+#   設定ファイルを一時的に無効化: --no_config
+#   プロファイルを一時的に変更  : --profile anime
+#
+# 狙い
+#   Amatsukaze の「追加オプション」欄を毎回書き換えるのが面倒なため、
+#   このファイルだけを編集すれば設定が切り替わるようにしてある。
+#   精度検証では active_profile の1行を差し替えて比較する。
+#
+# 書き方
+#   キー名は --help のオプション名から先頭の "--" を外したもの。
+#   例: --beam_size 10  ->  beam_size: 10
+#       --standard_asia ->  standard_asia: true
+#   未知のキーはタイプミスを見逃さないためエラーになる。
+# ============================================================
+
+
+# ------------------------------------------------------------
+# override: CLI と競合したときにどちらを優先するか
+#
+#   true  … このファイルを優先する。Amatsukaze が渡してくる
+#           オプションを無視して、ここの値で上書きする。
+#   false … CLI 指定を優先する。このファイルは CLI が
+#           指定しなかった項目を埋めるだけになる。
+#
+# どちらの場合も、どの値が採用されたかは [CONFIG] 行に出力される。
+# ------------------------------------------------------------
+override: true
+
+
+# ------------------------------------------------------------
+# active_profile: 下の profiles: から適用するプロファイル名
+# 空 or 削除すると、フラットに書いた共通設定だけが使われる。
+# ------------------------------------------------------------
+active_profile: anime
+
+
+# ============================================================
+# 共通設定（全プロファイルのベース。profiles: の値が上に乗る）
+# ============================================================
+
+# 品質。**既定の 5 のままにしてある。**
+#
+# Amatsukaze は --beam_size 10 --best_of 10 を渡してくるので、override: true と
+# あわせてここで 5 に戻す意味がある。24分アニメ9本を同一素材で比較した実測
+# （HANDOVER 測定結果 #13）:
+#   beam 5   全文CER 22.0% / カバレッジ 80.3%   ← これ
+#   beam 10  全文CER 22.3% / カバレッジ 80.1%
+# 9本中8本で beam 10 が同等または悪化した。時間は +2.8% しか変わらないので、
+# 速度ではなく精度の理由で 5 を使う。
+beam_size: 5
+best_of: 5
+
+# VAD。外部 silero を使い、区間は clip_timestamps で渡す（clip は既定なので
+# 書かなくてよい）。**この1行が精度に一番効く。**
+#
+# 無指定だと既定の silero_v5_fw、つまり faster-whisper の内蔵VAD経路になる。
+# 24分アニメ9本の実測では、内蔵は発話を2割落として全文CER 27.1%、
+# こちらは 24.3%（カバレッジ 74.1% 対 80.4%）。Amatsukaze は --vad_method を
+# 渡してこないので、ここに書かないと測定で最良だった構成にならない。
+vad_method: silero_v5
+
+
+# ============================================================
+# 以下はマイナーオプション。使うときだけコメントを外す。
+# ============================================================
+
+# --- モデル・デバイス ---------------------------------------
+# model: large-v3            # large-v3 / large-v3-turbo / medium / small
+#                            # anime-whisper / kotoba-v2 などのエイリアスや、
+#                            # Hugging Face のリポジトリIDも指定できる。
+#                            # 一覧は --list_models で表示。
+#                            # Amatsukaze は -m を自分で渡してくるので、
+#                            # モデルを変えるときは override: true と併用する。
+# model_dir: null            # モデル保存先。null で自動
+# device: auto               # cuda / cpu / auto
+# compute_type: default      # float16 / int8 / int8_float16 / float32 ...
+
+# --- 出力 ---------------------------------------------------
+# output_dir: source         # source=入力と同じ場所 / default=exe の場所 / 任意のパス
+# output_format: [srt]       # srt / vtt / json / txt / tsv / lrc / all（複数可）
+# postfix: false             # 検出言語をファイル名末尾に付ける
+
+# --- 言語・タスク -------------------------------------------
+# language: ja               # null で自動検出
+# task: transcribe           # transcribe / translate
+
+# --- 品質・精度 ---------------------------------------------
+# temperature: 0
+# patience: 2.0
+# length_penalty: 1.0
+# repetition_penalty: 1.0    # 1.0 より大きくすると繰り返しを抑制
+# no_repeat_ngram_size: 0
+# initial_prompt: null       # null でプロンプトを渡さない（推奨）
+# condition_on_previous_text: false   # true にするとハルシネーションが増える
+# compression_ratio_threshold: 2.4
+# logprob_threshold: -1.0
+# no_speech_threshold: 0.6
+# word_timestamps: true      # 字幕整形の再タイミングに使うので true 推奨
+
+# --- ハルシネーション対策 -----------------------------------
+# hallucination_silence_threshold: 0  # 0=無効。アニメ素材では正常セグメントも消えるため非推奨
+
+# --- VAD ----------------------------------------------------
+# vad_method は上の共通設定で silero_v5 にしてある（理由もそこに書いた）。
+# vad_filter: true
+# vad_threshold: 0.45        # 実測で最良。0.30 / 0.15 は試して悪化した
+# vad_min_speech_duration_ms: 250
+# vad_max_speech_duration_s: null
+# vad_min_silence_duration_ms: 3000   # 500 / 100 も試したが悪化した
+# vad_speech_pad_ms: 900     # 200 も試したが悪化した
+# vad_segment_mode: clip     # clip / collect。既定の clip が実測で優れている
+# vad_device: cpu            # 外部VAD専用。内蔵経路はCPU決め打ち
+
+# --- 字幕整形 -----------------------------------------------
+# standard: false            # 幅42字・2行・文単位
+# standard_asia: false       # 幅16字・2行・文単位（日本語向け）
+# sentence: false            # 文単位で分割
+# max_line_width: 1000       # 1行の最大文字数
+# max_line_count: 1          # 1つの字幕の最大行数
+# max_gap: 3.0               # この秒数を超える無音を文の切れ目として扱う
+
+# --- バッチ処理 ---------------------------------------------
+# batch_recursive: false
+# skip: false                # 出力済みならスキップ
+# check_files: false
+# print_progress: false
+# beep_off: false
+
+# --- 音声フィルター（実験的。VADとの相性問題あり） ----------
+# ff_track: 1
+# ff_loudnorm: false
+# ff_lowhighpass: false
+# ff_rnndn_sh: false
+# ff_rnndn_xiph: false
+# ff_fftdn: 0                # 0=無効 / 12=標準 / 最大97
+# ff_gate: false
+# ff_speechnorm: false
+# ff_fc: false
+# ff_lc: false
+# ff_invert: false
+# ff_tempo: 1.0
+# ff_silence_suppress: [0, 3.0]   # [閾値dB, 最小長秒]
+# ff_vocal_extract: null     # mdx_kim2 / mb-roformer
+# mdx_chunk: 15
+# voc_device: cuda
+
+# --- その他 -------------------------------------------------
+# realign: false             # 実験的。モデルを二重ロードするため遅い
+# realign_device: null
+# verbose: false
+
+
+# ============================================================
+# プロファイル
+# active_profile で選ぶ。共通設定の上に重ねて適用される。
+# ============================================================
+profiles:
+
+  # 素の設定。共通設定だけを使う
+  plain: {}
+
+  # 日本語アニメ向け。字幕を16字2行に整形する
+  anime:
+    language: ja
+    standard_asia: true
+
+  # アニメ調セリフに特化したモデルを使う。language と no_repeat_ngram_size は
+  # モデル側の既定値（ja / 5）が自動で入るため書かなくてよい。
+  # 初期プロンプトはこのモデルと相性が悪いので指定しないこと。
+  anime_model:
+    model: anime-whisper
+    standard_asia: true
+
+  # 実況・レース等ノイズの多い素材。音声フィルターは実験的
+  race:
+    language: ja
+    ff_loudnorm: true
+    ff_lowhighpass: true
+
+  # 小声の拾い漏れ対策
+  quiet:
+    language: ja
+    vad_threshold: 0.3
+    vad_speech_pad_ms: 1200
+
+  # ハルシネーション抑制を強めた設定
+  strict:
+    language: ja
+    repetition_penalty: 1.2
+    no_repeat_ngram_size: 3
+
+  # 精度検証用。速いモデルで素早く回す
+  fastcheck:
+    model: large-v3-turbo
+    beam_size: 5
+    best_of: 5

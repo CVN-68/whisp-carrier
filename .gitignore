@@ -8,10 +8,18 @@ __pycache__/
 venv/
 .venv/
 env/
+# Isolated environments for VAD models that cannot share the main one:
+# inaSpeechSegmenter wants tensorflow[and-cuda], funasr-onnx pins numpy<=1.26.4.
+# See HANDOVER 測定結果 #18.
+_venv*/
 
-# PyInstaller
+# PyInstaller. The -full variants come from building with WHISP_CARRIER_FULL=1
+# and a separate --distpath/--workpath, so that verifying it does not overwrite
+# the normal build.
 build/
 dist/
+build-full/
+dist-full/
 *.manifest
 
 # IDE
@@ -33,9 +41,23 @@ _models/
 # Temp files
 *.tmp
 *.bak
+_tmp*/
 
 # Test files
 make_test_audio.py
 test.wav
 test_speech.wav
 test_speech.srt
+
+# Evaluation material and results (large, and the source is recorded broadcast)
+_eval/
+sample/
+
+# Third-party binaries fetched for the build (ffmpeg). The binary itself is not
+# ours to commit, but the record of what went in has to survive, so
+# PROVENANCE.txt is tracked. Re-including a single file needs the directory to
+# stay visible to git, hence the three-step pattern rather than a bare _tools/.
+_tools/*
+!_tools/ffmpeg/
+_tools/ffmpeg/*
+!_tools/ffmpeg/PROVENANCE.txt
