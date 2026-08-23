@@ -383,20 +383,31 @@ development build with no guarantees.
 
 ## Acknowledgements / Based On
 
-This project builds on the following open-source projects:
+This project builds on the following open-source projects. **The complete list of
+everything bundled, with licence texts, is in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** (which also ships in the archive).
 
-| Project | Role | Link |
-|---------|------|------|
-| OpenAI Whisper | Original speech recognition model | https://github.com/openai/whisper |
-| faster-whisper | CTranslate2-based Whisper inference engine | https://github.com/SYSTRAN/faster-whisper |
-| Anime Whisper | Japanese anime dialogue model (`-m anime-whisper`) | https://huggingface.co/litagin/anime-whisper |
-| Kotoba-Whisper | Japanese distilled Whisper, base of Anime Whisper | https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0 |
-| PyTorch | GPU computation (CUDA 12.8 / sm_120 support) | https://pytorch.org/ |
-| silero-vad | Voice Activity Detection model | https://github.com/snakers4/silero-vad |
-| audio-separator | Vocal extraction (MDX / Mel-Band-Roformer) | https://github.com/karaokenerds/python-audio-separator |
-| stable-ts | Timestamp realignment (experimental) | https://github.com/jianfch/stable-ts |
-| CTranslate2 | Efficient transformer inference | https://github.com/OpenNMT/CTranslate2 |
-| ffmpeg | Audio preprocessing & filtering | https://ffmpeg.org/ |
+| Project | Role | Licence | Link |
+|---------|------|---------|------|
+| OpenAI Whisper | Original speech recognition model | MIT | https://github.com/openai/whisper |
+| faster-whisper | CTranslate2-based Whisper inference engine | MIT | https://github.com/SYSTRAN/faster-whisper |
+| CTranslate2 | Efficient transformer inference | MIT | https://github.com/OpenNMT/CTranslate2 |
+| **TEN VAD** | **Default voice activity detection** (`--vad_method ten`); its DLL is bundled | **Apache-2.0** | https://github.com/TEN-framework/ten-vad |
+| silero-vad | Alternative VAD (the previous default); faster-whisper's built-in v6 ONNX is the same model | MIT | https://github.com/snakers4/silero-vad |
+| onnxruntime | Runs that ONNX model | MIT | https://onnxruntime.ai |
+| PyTorch | GPU computation (CUDA 12.8 / sm_120 support) | BSD-3-Clause | https://pytorch.org/ |
+| PyAV | Audio decoding (through faster-whisper) | BSD-3-Clause | https://github.com/PyAV-Org/PyAV |
+| ffmpeg | Audio preprocessing and filtering (run as a separate process) | **LGPL v3** (the bundled build) | https://ffmpeg.org/ |
+| libsndfile | Audio I/O (through `soundfile`) | **LGPL-2.1-or-later** | https://github.com/libsndfile/libsndfile |
+| PyInstaller | Freezing to an exe (its bootloader ships inside) | GPL-2.0 with an exception for distributing frozen apps | https://github.com/pyinstaller/pyinstaller |
+| PyYAML | Config file parsing | MIT | https://pyyaml.org/ |
+| Anime Whisper | Japanese anime dialogue model (`-m anime-whisper`) | MIT | https://huggingface.co/litagin/anime-whisper |
+| Kotoba-Whisper | Japanese distilled Whisper, base of Anime Whisper | Apache-2.0 | https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0 |
+| audio-separator | Vocal extraction (MDX / Mel-Band-Roformer); **script version only** | MIT | https://github.com/karaokenerds/python-audio-separator |
+| stable-ts | Timestamp realignment (experimental); **script version only** | MIT | https://github.com/jianfch/stable-ts |
+
+NVIDIA CUDA / cuDNN and Intel OpenMP are also bundled, arriving inside the `torch`
+and `ctranslate2` wheels; their redistribution terms are in THIRD-PARTY-NOTICES.md.
 
 Inspired by [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win) (Purfview) — a proprietary Whisper CLI with RTX 5090 support.  
 whisp-carrier reimplements equivalent functionality using only open-source components.

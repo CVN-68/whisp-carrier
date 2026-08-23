@@ -58,6 +58,7 @@ than being fetched separately. They dominate the size of the distribution.
 | cuDNN 9 (`cudnn*64_9.dll`) | NVIDIA, via `torch` and `ctranslate2` | [NVIDIA cuDNN licence](https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html) |
 | Intel OpenMP (`libiomp5md.dll`) | Intel, via `ctranslate2` | [Intel Simplified Software License](https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html) |
 | CTranslate2 (`ctranslate2.dll`) | [OpenNMT/CTranslate2](https://github.com/OpenNMT/CTranslate2) | MIT |
+| **PyInstaller bootloader** (compiled into `whisp-carrier.exe`) | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | **GPL-2.0-or-later with the bootloader exception** — see section 5 |
 | **libsndfile** (`_soundfile_data/libsndfile_x64.dll`) | [libsndfile](https://github.com/libsndfile/libsndfile), via `soundfile` | **LGPL-2.1-or-later** — see section 5 |
 | Microsoft Visual C++ runtime, OpenSSL (`libssl-3.dll`, `libcrypto-3.dll`), SQLite, expat, libffi | CPython 3.11 redistributables | Respective upstream licences (MS runtime redistribution terms, Apache-2.0, public domain, MIT) |
 
@@ -166,11 +167,14 @@ statically linked into whisp-carrier's own code.
 |---|---|---|---|
 | ffmpeg | LGPL-3.0-or-later | Separate process | Ship the licence text (done: `LICENSE.ffmpeg.txt`) and point at the sources (done: section 1). Users may replace the binary. |
 | libsndfile | LGPL-2.1-or-later | Dynamic library loaded by `soundfile` | Licence text and source availability: https://github.com/libsndfile/libsndfile |
+| PyInstaller bootloader | GPL-2.0-or-later **with the bootloader exception** | Compiled into `whisp-carrier.exe` as the startup stub | The exception exists precisely so that a frozen application can be distributed under its own terms, so MIT code stays MIT. Source and licence: https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt |
 | certifi | MPL-2.0 | CA bundle, data only | Source availability for the file itself; no effect on surrounding code |
 | tqdm | MPL-2.0 AND MIT | Imported library | As above |
 
 None of these makes the distribution GPL. That would have happened with a GPL
-build of ffmpeg, which is why the build now refuses one.
+build of ffmpeg, which is why the build now refuses one. The PyInstaller
+bootloader is the only GPL-derived code physically inside the exe, and its
+exception is written for exactly this case.
 
 `python-soxr` (LGPL-2.1-or-later) was present in earlier builds through
 `librosa`. Excluding the conversion path removed `librosa`, and with it soxr;
@@ -240,3 +244,9 @@ Also re-check `torch/lib` and `ctranslate2` for native libraries, `_internal`
 for `ffmpeg.exe`, and `_tools/ffmpeg/PROVENANCE.txt` for the bundled ffmpeg's
 provenance. Grep the TOCs directly to confirm an exclusion actually took
 effect; a spec `excludes` entry that never matched fails silently.
+
+One component appears in neither source: **the PyInstaller bootloader**, which is
+compiled into `whisp-carrier.exe` itself rather than sitting in `_internal` or the
+PYZ archive. It was missing from this file until 2026-08-23 for that reason. It is
+also the only GPL-derived code in the distribution, so it is worth carrying
+forward by hand.

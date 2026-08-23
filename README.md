@@ -477,19 +477,30 @@ VAD区間数・発話秒数・セグメント数・抑制したループまで�
 ## ベースとなったプロジェクト
 
 本プロジェクトは以下のオープンソースプロジェクトを基に構築されています。
+**同梱物の完全な一覧とライセンス条文の所在は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** にあります
+（配布アーカイブにも同梱）。
 
-| プロジェクト | 役割 | リンク |
-|-------------|------|--------|
-| OpenAI Whisper | 音声認識モデル本体 | https://github.com/openai/whisper |
-| faster-whisper | CTranslate2ベースのWhisper推論エンジン | https://github.com/SYSTRAN/faster-whisper |
-| Anime Whisper | 日本語アニメ調セリフ向けモデル（`-m anime-whisper`） | https://huggingface.co/litagin/anime-whisper |
-| Kotoba-Whisper | 日本語蒸留Whisper。Anime Whisperのベース | https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0 |
-| PyTorch | GPU計算基盤（CUDA 12.8 / sm_120 対応） | https://pytorch.org/ |
-| silero-vad | 音声区間検出モデル | https://github.com/snakers4/silero-vad |
-| audio-separator | ボーカル抽出（MDX / Mel-Band-Roformer） | https://github.com/karaokenerds/python-audio-separator |
-| stable-ts | タイムスタンプ再調整（実験的） | https://github.com/jianfch/stable-ts |
-| CTranslate2 | 高速Transformer推論 | https://github.com/OpenNMT/CTranslate2 |
-| ffmpeg | 音声前処理・フィルタリング | https://ffmpeg.org/ |
+| プロジェクト | 役割 | ライセンス | リンク |
+|-------------|------|-----------|--------|
+| OpenAI Whisper | 音声認識モデル本体 | MIT | https://github.com/openai/whisper |
+| faster-whisper | CTranslate2ベースのWhisper推論エンジン | MIT | https://github.com/SYSTRAN/faster-whisper |
+| CTranslate2 | 高速Transformer推論 | MIT | https://github.com/OpenNMT/CTranslate2 |
+| **TEN VAD** | **既定の音声区間検出**（`--vad_method ten`）。DLL を同梱 | **Apache-2.0** | https://github.com/TEN-framework/ten-vad |
+| silero-vad | 代替の音声区間検出（旧既定）。faster-whisper 内蔵の v6 ONNX も同じモデル | MIT | https://github.com/snakers4/silero-vad |
+| onnxruntime | 上の ONNX モデルの実行 | MIT | https://onnxruntime.ai |
+| PyTorch | GPU計算基盤（CUDA 12.8 / sm_120 対応） | BSD-3-Clause | https://pytorch.org/ |
+| PyAV | 音声デコード（faster-whisper 経由） | BSD-3-Clause | https://github.com/PyAV-Org/PyAV |
+| ffmpeg | 音声前処理・フィルタリング（別プロセスとして実行） | **LGPL v3**（同梱ビルド） | https://ffmpeg.org/ |
+| libsndfile | 音声の読み書き（`soundfile` 経由） | **LGPL-2.1-or-later** | https://github.com/libsndfile/libsndfile |
+| PyInstaller | exe 化（ブートローダーが exe に入る） | GPL-2.0 + 凍結物の配布を認める例外 | https://github.com/pyinstaller/pyinstaller |
+| PyYAML | 設定ファイルの読み込み | MIT | https://pyyaml.org/ |
+| Anime Whisper | 日本語アニメ調セリフ向けモデル（`-m anime-whisper`） | MIT | https://huggingface.co/litagin/anime-whisper |
+| Kotoba-Whisper | 日本語蒸留Whisper。Anime Whisperのベース | Apache-2.0 | https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0 |
+| audio-separator | ボーカル抽出（MDX / Mel-Band-Roformer）。**スクリプト版のみ** | MIT | https://github.com/karaokenerds/python-audio-separator |
+| stable-ts | タイムスタンプ再調整（実験的）。**スクリプト版のみ** | MIT | https://github.com/jianfch/stable-ts |
+
+CUDA / cuDNN（NVIDIA）と Intel OpenMP も `torch` と `ctranslate2` の wheel 経由で
+同梱されています。再配布条件は THIRD-PARTY-NOTICES.md に記載しています。
 
 開発のきっかけ：[Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)（Purfview作）のRTX 5090対応版が有料かつソース非公開だったため、同等機能をオープンソースのみで再実装したもの。
 

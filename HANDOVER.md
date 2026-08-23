@@ -291,32 +291,100 @@ whisp-carrier.yaml.example  whisp_carrier.py  whisp_carrier.spec  whisp_models.p
 
 ### 次の1コマンド
 
-**配布アーカイブを分割する**（[次の着手 B](#b-配布アーカイブサイズ上限に引っかかる)）。
-通常ビルドは 4.78GB で GitHub Releases の1ファイル上限 2GB を超える。
+**配布アーカイブは作り終えた**（[結果](#配布アーカイブ2分割で作った2026-08-23)）。
+残っているのは GitHub Releases への公開だけで、
+`dist/whisp-carrier-0.1.0.7z.001` と `.002` をアップロードする。
+**両方を同じリリースに上げること**（分割アーカイブは片方だけでは展開できない）。
+
+### 配布アーカイブ（2分割で作った・2026-08-23）
+
+**4900 MiB → 1999 MiB の2分割。両方とも GitHub の1ファイル上限 2GB 未満。**
+**これが公開する版**（README と THIRD-PARTY-NOTICES の
+[修正](#参考プロジェクト表と-third-party-notices-の欠落を直した2026-08-23)を含む。
+最初に固めたものは古い docs を含んでいたので破棄し、13:25 に再パックした）。
+
+| ファイル | サイズ | SHA-256 |
+|---------|--------|---------|
+| `whisp-carrier-0.1.0.7z.001` | 1,992,294,400（1900 MiB） | `5EA445B2251E3732FD2A041506A657317A0E78EE778E0247C296524405DDCBB1` |
+| `whisp-carrier-0.1.0.7z.002` | 103,771,666（99 MiB） | `20F6F3E54491A50C835F4B1869491431B9B58030260FB77924A9F54B92FE3597` |
+
+`7z t` で整合性を確認済み（`Everything is Ok`、522 folders / 3029 files、
+展開後 5,137,515,654 バイト、合計 2,096,066,066 バイト）。
+**アーカイブ内の docs も確認した**（`README.md` 44,842 バイト /
+`THIRD-PARTY-NOTICES.md` 15,087 バイト = 修正後の版）。
+**`whisp-carrier.yaml` は入っておらず `.example` だけが入っている**
+（`7z l` の出力を `whisp-carrier\.yaml$` で検索して0件）。
+開発機の設定は元の場所に戻してある（MD5 `399D11649E65FF7102DAE603ECBD7ECD` で確認）。
+
+**手順。`-x` による除外は使わない**（下の罠を踏むため）。
+**生きた設定を一時的に外に出してから固める。**
 
 ```powershell
-# 7-Zip で 1900MB ごとに分割（3分割になる想定）
-# -xr!whisp-carrier.yaml が必須。理由は下記。.example は名前が違うので残る
-& "C:\Program Files\7-Zip\7z.exe" a -v1900m dist\whisp-carrier-0.1.0.7z `
-    .\dist\whisp-carrier\* -xr!whisp-carrier.yaml
+# 1. 開発機の設定をアーカイブ対象の外へ退避する
+Move-Item dist\whisp-carrier\whisp-carrier.yaml dist\whisp-carrier.yaml.devbak -Force
+
+# 2. 退避できたことを目で確認する（.example だけが残っていること）
+Get-ChildItem dist\whisp-carrier -File | Select-Object -ExpandProperty Name
+
+# 3. 除外スイッチなしで固める。フォルダ名を渡すこと（末尾に \* を付けない）
+cd dist
+& "C:\Program Files\7-Zip\7z.exe" a -v1900m -bsp0 whisp-carrier-0.1.0.7z whisp-carrier
+
+# 4. 中身を確認する。whisp-carrier.yaml が無く .example があること
+& "C:\Program Files\7-Zip\7z.exe" l whisp-carrier-0.1.0.7z.001 > list.log 2>&1
+& "C:\Program Files\7-Zip\7z.exe" t whisp-carrier-0.1.0.7z.001    # 整合性
+
+# 5. 設定を戻す（MD5 で戻ったことを確認する）
+Move-Item dist\whisp-carrier.yaml.devbak dist\whisp-carrier\whisp-carrier.yaml -Force
 ```
 
-**`dist/whisp-carrier/whisp-carrier.yaml` は必ず除外すること**（決定済み。
-[配布は `.example` だけ](#b-配布アーカイブサイズ上限に引っかかる)）。
-いま置いてあるのは**開発機の生きた設定**で、`override: true` + `language: ja` +
-`standard_asia: true` が入っている。**`override: true` は呼び出し側の指定を
-打ち消す**ので、同梱すると利用者が whisper-option 欄に `--language en` と書いても
-黙って `ja` になり、頼んでいない16字2行の整形も掛かる。
+**所要は圧縮だけで6〜10分。** 進行状況は `.001.tmp` の**サイズ**で見ること。
+**ファイル名の有無で判断すると誤る**（`.tmp` は開始直後に作られ、完了時に消えるので、
+「名前がある＝進行中」も「名前が無い＝失敗」もどちらも成立しない）。
+`7z` プロセスの有無とログの `Everything is Ok` / `PACK_EXIT=0` で確定させる。
 
+**`\*` を付けないのは展開時の体裁のため。** `.\dist\whisp-carrier\*` にすると
+中身だけが詰まるので、利用者が展開したときに3000個のファイルがその場に散る。
+フォルダ名を渡せば `whisp-carrier\` ごと復元される。
+
+> ## ⚠ `-xr!whisp-carrier.yaml` は黙って効かなかった
+>
+> **このドキュメントは当初 `-xr!whisp-carrier.yaml` で除外する手順を書いていたが、
+> 実測すると除外されずにアーカイブへ入った。** 小さなフォルダで再現を取ってある
+> （`whisp-carrier.yaml` と `.example` と `sub\keep.txt` を置いて実行 →
+> **3ファイルすべてが入る**）。エラーも警告も出ない。
+>
+> **設定やライセンスの同梱可否を「効いたか分からないスイッチ」に委ねてはいけない。**
+> ファイルを物理的に外へ出す方式なら、固める前に `Get-ChildItem` で目視できる。
+>
+> あわせて `.\dist\whisp-carrier -xr!...` の組み合わせでは
+> `指定されたファイルが見つかりません` の警告つきで **0 files, 32 bytes の空アーカイブ**が
+> できた。原因は詰めていない（除外方式を捨てたので追う価値が無い）。
+> **空アーカイブは `Archive size: 32 bytes` で判別できる。**
+> `-xr!*.yaml` のようなワイルドカードも論外で、`.example` まで落ちる。
+
+**同梱物は8点 + `_internal/`。** アーカイブの一覧で確認した内容。
+
+```
+whisp-carrier\LICENSE                        MIT（このプロジェクト）
+whisp-carrier\LICENSE.ffmpeg.txt             LGPL v3（同梱 ffmpeg）
+whisp-carrier\LICENSE.ten-vad.license.txt    Apache-2.0（TEN VAD）
+whisp-carrier\LICENSE.ten-vad.notices.txt    同 NOTICE
+whisp-carrier\README.md                      日本語マニュアル（spec がコピーする）
+whisp-carrier\THIRD-PARTY-NOTICES.md         同梱物の一覧
+whisp-carrier\whisp-carrier.exe              47,802,820 バイト
+whisp-carrier\whisp-carrier.yaml.example     設定ファイルの雛形
+whisp-carrier\_internal\...                  3021 ファイル
+```
+
+**`whisp-carrier.yaml`（開発機の生きた設定）が入っていないことを確認済み。**
+入れてはいけない理由は、`override: true` + `language: ja` + `standard_asia: true` が
+**呼び出し側の指定を打ち消す**こと。利用者が whisper-option 欄に `--language en` と
+書いても黙って `ja` になり、頼んでいない16字2行の整形も掛かる。
 **このファイルのコメントには訂正済みの誤解も残っている**
 （「Amatsukaze は `--beam_size 10 --best_of 10` を渡してくる」は
-[実際には whisper-option 欄の文字列](#13-実運用設定beam-10は測定設定beam-5よりわずかに悪い)で、
-ソフトの挙動ではない）。配ると誤解も一緒に配ることになる。
-
-**`-xr!*.yaml` のようなワイルドカードは使わないこと。**
-`whisp-carrier.yaml.example` まで落ちて、利用者が設定ファイルの雛形を得られなくなる。
-アーカイブを作ったら**中身を一覧して `.example` だけが入っていることを確認する**
-（`7z l` で `whisp-carrier.yaml` が無く `whisp-carrier.yaml.example` があること）。
+[実際には whisper-option 欄の文字列](#13-実運用設定beam-10は測定設定beam-5よりわずかに悪い)）。
+配ると誤解も一緒に配ることになる。
 
 **精度側と連携側は閉じている。** 追加で測るものは無い
 （[A の結果](#-完了実運用と測定が同一素材で一致した2026-08-22)・[15本の総括](#15本の総括2026-08-22)）。
@@ -1352,6 +1420,28 @@ HANDOVER に書く。**理由は重複が測定値を腐らせるから**で、
 - ファイル構成と依存関係 → [アーキテクチャ](#アーキテクチャ)
 - exe のビルド方法とライセンス検査 → [開発環境再構築手順](#開発環境再構築手順)
 - 音声フィルターがなぜ実験的なのか → [既知の問題 2](#2-音声フィルターが実用レベルに達していない)
+
+### 参考プロジェクト表と THIRD-PARTY-NOTICES の欠落を直した（2026-08-23）
+
+**README の「ベースとなったプロジェクト」表から TEN VAD が抜けていた。**
+**現在の既定VADで、DLL を同梱していて Apache-2.0（表記義務がある）**のに、
+旧既定の silero-vad だけが載っている状態だった。既定を差し替えたときに
+表を直し忘れたもの。あわせて、同梱しているのに載っていなかった
+**onnxruntime / PyAV / libsndfile / PyYAML / PyInstaller** を追加し、
+**ライセンス列**を足した（copyleft の ffmpeg と libsndfile がその場で見えるように）。
+`audio-separator` と `stable-ts` には「スクリプト版のみ」と付けた。
+表の末尾から [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) に送る導線も入れた。
+
+**THIRD-PARTY-NOTICES.md 側にも1件欠落があった。PyInstaller のブートローダー。**
+**exe に物理的に組み込まれるが、`_internal/` にも PYZ の TOC にも現れない**ので、
+あのファイルの再生成手順（2つのソースを突き合わせる方法）では原理的に拾えない。
+**同梱物の中で唯一 GPL 由来のコード**で、
+[ブートローダー例外](https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt)が
+まさにこのケース（凍結物を自分のライセンスで配る）のために書かれている。
+節2・節5・再生成手順の3箇所に追記した。
+
+**教訓。既定を変えたら「参考プロジェクト表」も差分の対象に入れること。**
+測定値と違って誰も再現確認をしないので、放っておくと残る。
 
 **英語側にだけ意図的に残した重複が1つある。ファイル構成。**
 HANDOVER は日本語しか無いので、英語の読者にはコードの地図が他に無い。
