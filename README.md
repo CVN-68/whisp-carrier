@@ -29,7 +29,7 @@ Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソ�
 - **モデルエイリアス** — 日本語アニメ向けの `-m anime-whisper` 等。transformers 形式の
   Whisper ファインチューンは初回実行時に CTranslate2 へ自動変換（スクリプト版のみ）
 - **字幕整形** — 文単位分割、行幅・行数指定、禁則処理、単語タイムスタンプによる再タイミング
-- **音声フィルター** — loudnorm、バンドパス、RNNoise、FFTノイズ除去、ノイズゲート等（実験的）
+- **音声フィルター** — loudnorm、バンドパス、FFTノイズ除去、ノイズゲート等（実験的）
 - **ボーカル抽出** — MelBand-Roformer（最高品質）/ MDX Kim_Vocal_2（スクリプト版のみ）
 - **設定ファイル** — YAMLでプロファイルを切り替え。Amatsukaze側の設定を触らずに変更できる
 - **出力形式** — SRT, VTT, JSON, TXT, TSV, LRC
@@ -39,6 +39,21 @@ Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソ�
 - Windows 10/11 (x64)
 - NVIDIA RTX GPU + CUDA 12.8 以上のドライバ
 - **Python も CUDA Toolkit も ffmpeg も不要です**（ffmpeg は同梱、LGPL版）
+
+> **GPU が認識できないとき、エラーで止まらずに CPU で動き続けます。**
+> ドライバが CUDA 12.8 未満だったり NVIDIA GPU が無い環境では、
+> `device=cpu` / `compute=int8` に落ちて処理を続行します。**動きはしますが実用的な速度は出ません。**
+> 「落ちないが終わらない」ときはまずここを疑ってください
+> （CPU 側の速度は測っていないので、下の「測定した精度」の所要時間は当てはまりません）。
+>
+> 判定は起動時に出る `device=` の行です。**`device=cuda` になっていれば GPU を使っています。**
+>
+> ```
+> ctranslate2 4.8.1 | device=cuda | compute=float16     ← 正常
+> ctranslate2 4.8.1 | device=cpu | compute=int8         ← GPU を使えていない
+> ```
+>
+> `whisp-carrier.exe --checkcuda` でも確認できます（`1` 以上なら GPU が見えています。`0` なら見えていません）。
 
 アーカイブを展開して、`whisp-carrier.exe` を好きな場所に置くだけです。
 Amatsukaze から呼ぶ場合は[Amatsukaze との連携](#amatsukaze-との連携)へ。
@@ -323,7 +338,7 @@ profiles:
 これも Faster-Whisper-XXL に同様に見られます（同一素材9本で XXL 11件、本実装 43件）。
 落とすフィルタは意図的に実装していません。**0.3〜0.6pt の精度向上のために、
 作中のテレビ放送や配信を締める台詞を誤って消す機構を入れる取引が悪い**と
-判断しました。詳細は HANDOVER.md の測定結果 #20 にあります。
+判断しました。詳細は [MEASUREMENTS.md](MEASUREMENTS.md) の測定結果 #20 にあります。
 
 ## exe版とスクリプト版の違い
 
@@ -500,7 +515,8 @@ python whisp_carrier.py <wav> -m large-v3 -f json --no_config --beep_off
 当実装はフィルターを使わない方針で決着しているため、
 XXL だけフィルター有効で回すと非対称な比較になります。
 
-測定環境・素材・指標の定義は [HANDOVER.md](HANDOVER.md) にあります。
+測定環境・素材・指標の定義は [HANDOVER.md](HANDOVER.md)、
+測定結果そのものは [MEASUREMENTS.md](MEASUREMENTS.md) にあります。
 
 ## ステータス
 
@@ -656,8 +672,8 @@ exe 版とスクリプト版で共通です。**スクリプト版でしか動�
 | `--ff_fc` | なし | フロントセンターのみ抽出 |
 | `--ff_lc` | なし | 左チャンネルのみ抽出 |
 | `--ff_invert` | なし | 左ch極性反転+モノラルミックス |
-| `--ff_rnndn_sh` | なし | RNNoise SHモデル（攻撃的） |
-| `--ff_rnndn_xiph` | なし | RNNoise Xiphモデル（穏やか） |
+| ~~`--ff_rnndn_sh`~~ | — | **使えません。** RNNoise の学習済みモデル（`sh.rnnn`）を同梱していないため、指定すると ffmpeg が `Failed to open model file` で失敗します（exit 1） |
+| ~~`--ff_rnndn_xiph`~~ | — | **使えません。** 同上（`xiph.rnnn`） |
 | `--ff_fftdn` | `0` | FFTノイズ除去（0=無効、12=標準、最大97） |
 | `--ff_gate` | なし | ノイズゲート |
 | `--ff_speechnorm` | なし | 音声部分を極端に増幅 |

@@ -46,8 +46,12 @@ body:
     attributes:
       label: 起動バナーの1行
       description: |
-        実行すると最初に出る行をそのまま貼ってください。版・torch・CUDA・GPU が1行に入っています。
-      placeholder: "whisp-carrier 0.9.0 | torch 2.8.0+cu128 | CUDA: True | GPU: NVIDIA GeForce RTX 5090"
+        実行すると最初に出る行をそのまま貼ってください。版・推論ランタイム・torch の有無・
+        CUDA の認識が1行に入っています。
+
+        **0.9.1 以降は torch を同梱しないので、GPU 名は出ません**
+        （`(name unavailable without torch)` になります）。下の「環境」欄に書いてください。
+      placeholder: "whisp-carrier 0.9.1 | ctranslate2 4.8.1 | torch not bundled | CUDA: True | GPU: (name unavailable without torch)"
       render: text
     validations:
       required: true

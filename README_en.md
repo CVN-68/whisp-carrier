@@ -11,7 +11,8 @@ exe cannot do is listed [below](#what-the-exe-build-cannot-do).
 
 > The Japanese [README.md](README.md) is the fuller document: it also carries the
 > complete option reference, the Amatsukaze field examples and the caveat list.
-> `HANDOVER.md` holds the design decisions and the raw measurements, and is
+> `HANDOVER.md` holds the design decisions, `MEASUREMENTS.md` the raw
+> measurements and `STATUS.md` where the project currently stands. All three are
 > Japanese only (its commands are copy-pasteable regardless).
 
 ## Features
@@ -30,7 +31,7 @@ exe cannot do is listed [below](#what-the-exe-build-cannot-do).
   on nine TV recordings (measured under the silero default and the pre-fix scoring
   script; `--loop_filter false` to keep them)
 - **Vocal extraction** — MelBand-Roformer (SOTA quality) and MDX Kim_Vocal_2
-- **Audio filters** — loudnorm, bandpass, RNNoise, FFT denoise, noise gate, etc.
+- **Audio filters** — loudnorm, bandpass, FFT denoise, noise gate, etc.
 - **Subtitle formatting** — sentence splitting, line width and count limits, Japanese kinsoku, re-timing from word timestamps
 - **YAML profiles** — switch settings from a config file without touching the caller's options
 - **Multiple output formats** — SRT, VTT, JSON, TXT, TSV, LRC
@@ -40,6 +41,21 @@ exe cannot do is listed [below](#what-the-exe-build-cannot-do).
 - Windows 10/11 (x64)
 - NVIDIA RTX GPU with a CUDA 12.8+ driver
 - **No Python, no CUDA Toolkit and no ffmpeg needed** (an LGPL ffmpeg is bundled)
+
+> **If the GPU cannot be used, this does not stop with an error — it keeps going on the CPU.**
+> With a driver older than CUDA 12.8, or no NVIDIA GPU, it falls back to
+> `device=cpu` / `compute=int8` and carries on. **It works, but not at a usable speed.**
+> If a run never seems to finish rather than failing, check this first. CPU speed has not
+> been measured, so the timings under "Measured accuracy" do not apply to it.
+>
+> The `device=` line printed at startup tells you which one you got:
+>
+> ```
+> ctranslate2 4.8.1 | device=cuda | compute=float16     <- fine
+> ctranslate2 4.8.1 | device=cpu | compute=int8          <- the GPU is not being used
+> ```
+>
+> `whisp-carrier.exe --checkcuda` reports the same thing as a number (`0` means no GPU is visible).
 
 Unpack the archive and run the exe. `LICENSE`, `LICENSE.ffmpeg.txt`,
 `LICENSE.ten-vad.*.txt`, `THIRD-PARTY-NOTICES.md` and
@@ -233,8 +249,8 @@ high-frequency training phrases against non-speech, and Faster-Whisper-XXL does
 the same (11 occurrences against this implementation's 43 over the same nine
 references). No filter for them is shipped, deliberately: **removing 0.3 to
 0.6 points of CER is not worth a mechanism that could delete a real line spoken
-by an in-universe broadcaster or streamer.** Measurement #20 in HANDOVER.md has
-the details.
+by an in-universe broadcaster or streamer.** Measurement #20 in
+[MEASUREMENTS.md](MEASUREMENTS.md) has the details.
 
 ## What the exe build cannot do
 
@@ -396,7 +412,8 @@ cannot simply be borrowed.
 and this project has settled on not using filters, so enabling them on one side
 only would make the comparison asymmetric.
 
-`HANDOVER.md` documents the corpus, the metrics and how they are computed.
+`HANDOVER.md` documents the corpus, the metrics and how they are computed;
+[MEASUREMENTS.md](MEASUREMENTS.md) carries the results themselves.
 
 ## Status
 
