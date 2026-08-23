@@ -131,7 +131,7 @@ MEDIA_EXTENSIONS = {
     ".ts", ".m2ts", ".mts",
 }
 
-VERSION = "0.1.0"
+VERSION = "0.9.0"
 
 # ─────────────────────────────────────────────
 # Per-backend VAD threshold
