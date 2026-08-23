@@ -79,7 +79,7 @@ whisp-carrier.exe "動画.mp4" -m _models\ct2-litagin-anime-whisper-float16 -o s
 
 | エイリアス | 実体 | ライセンス | 備考 |
 |-----------|------|-----------|------|
-| `anime-whisper` | [litagin/anime-whisper](https://huggingface.co/litagin/anime-whisper) | MIT | kotoba-whisper-v2.0 を約5,300時間のアニメ調演技セリフでファインチューンしたモデル。学習外のノベルゲーム音声で CER 13.0（whisper-large-v3 は 16.5）とモデルカードが報告 |
+| `anime-whisper` | [litagin/anime-whisper](https://huggingface.co/litagin/anime-whisper) | MIT | kotoba-whisper-v2.0 を約5,300時間のアニメ調演技セリフでファインチューンしたモデル。学習外のノベルゲーム音声で CER 13.0（whisper-large-v3 は 16.5）とモデルカードが報告。**ただし手元の録画TVアニメでは large-v3 に大きく負ける**（下記）。推論は約2倍速い |
 | `kotoba-v2` | [kotoba-tech/kotoba-whisper-v2.0-faster](https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-faster) | Apache-2.0 | 日本語汎用。large-v3 の蒸留モデルで anime-whisper のベース。CTranslate2 形式で公開されているため変換不要 |
 
 エイリアスには「そのモデルが望むオプション」も紐づいています。
@@ -267,8 +267,10 @@ profiles:
    `model:` として書くのがいちばん素直です（`large-v3` を選んだままなら
    `override: true` が必要）。**exe は変換ができないので、先に開発版で
    一度変換しておく必要があります**（[該当節](#exe-版はモデル変換ができません)）。
-   **ただし anime-whisper は9本すべてで large-v3 に負けた**ので
-   （全文CER 41.8% 対 24.3%、旧指標）、字幕用途では推奨しません。
+   **ただし anime-whisper は字幕用途では推奨しません。**
+   現行の既定（large-v3 / TEN VAD）と同条件で測ると、
+   **全文CER 27.4% 対 50.7%**、30秒ブロック単位では 29.8% 対 62.6% でした
+   （子供向けアニメ1本、歌唱除外。anime-whisper に最も有利な素材を選んでこの差）。
 
    ※ この欄を毎回書き換えたくない場合は[設定ファイル](#設定ファイルプロファイル)を使ってください。
    `override: true` にすれば、この欄を空にしたままYAML側だけで設定を切り替えられます。
@@ -406,6 +408,32 @@ profiles:
 
 長尺での劣化はありません。一挙放送は5時間22分が 16.1%、4時間52分が **14.1%** で、
 後者は全測定中の最良値でした。
+
+### RTX 50番台では「追加オプションなしで動く」こと自体が差になります
+
+**Amatsukaze から Faster-Whisper-XXL r245.4 を追加オプションなしで呼ぶと、
+字幕生成が失敗します**（RTX 5090 で実測）。
+
+```
+Detecting language using up to the first 30 seconds.
+  File "faster_whisper\transcribe.py", line 1719, in encode
+RuntimeError: cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED
+AMT [warn] Whisper字幕生成に失敗: Exception thrown at Subtitle.cpp:94
+```
+
+落ちるのは**最初のエンコーダ処理**（言語判定の時点）なので、素材にもVRAMにも
+モデルサイズにも依存しません。**追加オプション欄に `-ct float32` を書けば動きますが、
+約2倍遅くなります。**
+
+**そして Amatsukaze はここで停止せずエンコードを続行します。**
+結果として**録画は完成して字幕だけ付かない**状態になり、ログを読まないと理由が分かりません。
+
+**whisp-carrier はこの経路を追加オプションなしで通ります。** それが
+[Amatsukaze との連携](#amatsukaze-との連携)で「欄は空のままを推奨」と書ける理由です。
+
+※ 確認したのは **r245.4（無料版）を RTX 5090** で動かした場合です。Blackwell 世代は
+すべて同じ sm_120 なので 5080 / 5070 でも同様と見られますが、実測はしていません。
+CTranslate2 側が sm_120 に対応すれば解消する可能性があります。
 
 ### 比較条件（推奨設定同士になっています）
 

@@ -74,7 +74,7 @@ whisp-carrier.exe "video.mp4" -m _models\ct2-litagin-anime-whisper-float16 -o so
 
 | Alias | Source | License | Notes |
 |-------|--------|---------|-------|
-| `anime-whisper` | [litagin/anime-whisper](https://huggingface.co/litagin/anime-whisper) | MIT | kotoba-whisper-v2.0 fine-tuned on 5,300h of anime-style acted dialogue. Reported CER 13.0 against 16.5 for whisper-large-v3 on out-of-training visual novel audio. |
+| `anime-whisper` | [litagin/anime-whisper](https://huggingface.co/litagin/anime-whisper) | MIT | kotoba-whisper-v2.0 fine-tuned on 5,300h of anime-style acted dialogue. Reported CER 13.0 against 16.5 for whisper-large-v3 on out-of-training visual novel audio. **On recorded TV anime here it loses badly to large-v3**: 50.7% against 27.4% whole-region CER under identical settings, on the material most favourable to it. Inference is about 2x faster. |
 | `kotoba-v2` | [kotoba-tech/kotoba-whisper-v2.0-faster](https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-faster) | Apache-2.0 | General Japanese, distilled from large-v3. Already CTranslate2, so nothing is converted. |
 
 An alias also carries the option defaults that model wants. `anime-whisper`
@@ -310,6 +310,32 @@ Structural differences, which matter more in practice for subtitles:
 
 There is no degradation on long material: the two marathon broadcasts scored
 16.1% and **14.1%**, the latter being the best result across the whole corpus.
+
+### On RTX 50-series, running with no extra options is itself the difference
+
+**Calling Faster-Whisper-XXL r245.4 from Amatsukaze with no extra options fails**
+(measured on an RTX 5090):
+
+```
+Detecting language using up to the first 30 seconds.
+  File "faster_whisper\transcribe.py", line 1719, in encode
+RuntimeError: cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED
+AMT [warn] Whisper字幕生成に失敗: Exception thrown at Subtitle.cpp:94
+```
+
+It dies in the **first encoder pass**, during language detection, so it does not
+depend on the material, on VRAM, or on the model size. Adding `-ct float32` to
+the options field makes it work, at roughly half the speed.
+
+**Amatsukaze does not stop there: it carries on encoding.** The recording
+finishes with no subtitles, and nothing but the log says why.
+
+**whisp-carrier runs that same path with no extra options**, which is why the
+Amatsukaze section here says to leave the option field empty.
+
+Scope: verified with r245.4 (the free build) on an RTX 5090. All Blackwell parts
+are sm_120, so a 5080 or 5070 should behave the same, but that was not measured.
+A CTranslate2 build with sm_120 support would presumably resolve it.
 
 ### How the comparison was set up
 
