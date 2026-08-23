@@ -1,0 +1,77 @@
+name: 機能要望
+description: ほしい機能・オプション。保留にしている機能への「これが必要」という声も歓迎します。
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **英語で書いていただいても構いません。** Feel free to answer in English.
+
+        **いくつかの機能は「要望が来てから着手する」方針で意図的に保留しています。**
+        依存関係が重く、入れると主経路のビルドが膨らむためです（exe は既に約4.8GB あります）。
+        **保留中のものに「これが必要」と書いていただくのが、着手を決める材料そのものです。**
+
+        - 話者分離（Faster-Whisper-XXL にはある機能）
+        - 音声フィルター（`--ff_*`）の実用化
+        - `--realign`（タイムスタンプ再調整）の安定化
+
+        逆に、**測った結果として却下したもの**もあります（定型句フィルタ、歌唱区間の除去、
+        `--batched` の最適化など）。理由は [HANDOVER.md](https://github.com/CVN-68/whisp-carrier/blob/main/HANDOVER.md) にあり、
+        **再検討する条件も書いてあります。** そこに書かれている条件を満たす材料があれば、それを添えてください。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 確認したこと
+      options:
+        - label: README のオプション一覧を見て、既にある機能ではないことを確認した
+          required: true
+        - label: 同じ要望の Issue が既にないか検索した
+          required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: 何をしたいのか（用途）
+      description: |
+        **機能そのものより、達成したいことを書いてください。** 別の手段で済むことがあります。
+      placeholder: |
+        録画した対談番組で、誰が話しているかを字幕に入れたい。
+        いまは出力後に手で振り分けているが、1本30分かかっている。
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: いま困っていること
+      description: 現状の回避方法と、それで足りない理由。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: どのあたりの機能か
+      options:
+        - 話者分離（保留中）
+        - 音声フィルターの実用化（保留中）
+        - "`--realign` の安定化（保留中）"
+        - 出力形式・字幕の整形
+        - VAD・区間検出
+        - モデルの扱い（追加モデル・変換）
+        - Amatsukaze 連携
+        - 設定ファイル・CLI の使い勝手
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: 参考（他のツールでの実装例、論文、実測データなど）
+      description: |
+        **実測データがあると判断が速くなります。** このプロジェクトは既定値をすべて実測で決めています。
+    validations:
+      required: false

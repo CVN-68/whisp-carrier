@@ -1,0 +1,128 @@
+name: 精度の報告（取りこぼし・ハルシネーション・タイムスタンプ）
+description: 字幕が出ない区間がある、同じ文が繰り返される、時間がずれる、など出力の質に関する報告。
+title: "[accuracy] "
+labels: ["accuracy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **英語で書いていただいても構いません。** Feel free to answer in English.
+
+        **先に「仕様として決めていること」を確認してください。** 該当するものは直しません。
+
+        - **OP/ED・挿入歌・歌唱シーンは対象外です。** 本編の台詞を字幕にすることが目標で、
+          歌を落とすフィルタは入れると精度が悪化したため入れていません（拾うことも落とすことも保証しません）。
+        - **「ご視聴ありがとうございました」などの定型句は消していません。**
+          消すと作中の台詞まで消える危険があるため、実測で 0.6pt の得しかない一方の危険を取らない判断です。
+        - **精度は素材の性質で大きく変わります。** 会話劇なら全文CER 10%前後、子供向け番組で20%台半ば、
+          発話率の低い素材で30%程度。**この幅の中の話は既知の性質**で、報告の価値があるのは
+          この幅から外れて悪い場合か、特定の区間で明確に壊れている場合です。
+
+        数値の定義と素材ごとの実測値は [HANDOVER.md](https://github.com/CVN-68/whisp-carrier/blob/main/HANDOVER.md) にあります。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 確認したこと
+      options:
+        - label: OP/ED・挿入歌・歌唱シーンの話ではない（対象外のため）
+          required: true
+        - label: README の「対象範囲」と「測定した精度」を読んだ
+          required: true
+        - label: "既定のまま（オプション無指定、`--no_config`）でも再現する"
+          required: false
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: 症状
+      options:
+        - 取りこぼし（話しているのに字幕が出ない）
+        - ハルシネーション・ループ（同じ文が繰り返される、言っていない文が出る）
+        - 文字が違う（固有名詞・同音異義語など）
+        - タイムスタンプがずれる
+        - 1つのセグメントが30秒を超える
+        - セグメントの区切りが粗い・細かすぎる
+        - 字幕の行組み（文字数・行数）が意図と違う
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: 該当区間
+      description: |
+        **タイムコードと、出力された字幕**を貼ってください。正解が分かる場合（放送字幕がある、聞き取れる）は
+        それも書いていただけると、こちら側で採点できます。素材そのものは不要です。
+      placeholder: |
+        00:12:34.500 --> 00:12:41.200
+        出力: ご視聴ありがとうございました。ご視聴ありがとうございました。
+        実際の台詞: （2人が言い争っている。台詞は「そんなの聞いてない」「聞いてないのはそっちだ」）
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: vad_log
+    attributes:
+      label: "`[VAD]` 行と `[STT] Done` 行"
+      description: |
+        取りこぼしの原因が VAD 側か推論側かがこの2行で分かれます。ログからそのまま貼ってください。
+      placeholder: |
+        [VAD] threshold 0.75 (default for ten)
+          [VAD] ten: 30 regions | 1246.7s of speech | detected in 7.1s
+        [STT] Done in 88.4s | dur=1246.7s | lang=ja (99.21%) | 412 segments
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: 設定
+      description: 既定から変えている項目だけで構いません（変えていなければ「既定のまま」）。
+      value: |
+        - モデル（`--model`）:
+        - VAD（`--vad_method` / `--vad_threshold`）:
+        - 整形（`--standard_asia` など）:
+        - 音声フィルター（`--ff_*`）:
+        - 設定ファイル（`whisp-carrier.yaml`）を置いているか:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: material
+    attributes:
+      label: 素材の性質
+      description: 精度の層がここで変わるため、いちばん近いものを選んでください。
+      options:
+        - 会話劇・職場もの（台詞が多く、間が短い）
+        - 一般的なアニメ（アクション・日常）
+        - 子供向け番組
+        - 実況・バラエティ（BGM や歓声が大きい）
+        - 一挙放送・長尺（2時間超）
+        - 映画・ドラマ
+        - アニメ以外・その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: banner
+    attributes:
+      label: 起動バナーの1行と使っているもの（exe版 / スクリプト版）
+      placeholder: |
+        whisp-carrier 0.9.0 | torch 2.8.0+cu128 | CUDA: True | GPU: NVIDIA GeForce RTX 5090
+        exe 版
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: そのほか
+      description: |
+        同じ症状が他の素材でも出るか、特定の1本だけか。試した設定と結果があれば書いてください。
+    validations:
+      required: false

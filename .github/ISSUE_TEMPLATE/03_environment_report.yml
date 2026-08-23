@@ -1,0 +1,84 @@
+name: 動作報告（自分の環境で動いた・動かなかった）
+description: 不具合でなくても歓迎します。開発機以外で動いた記録が足りていないため、成功報告に価値があります。
+title: "[env] "
+labels: ["environment-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **英語で書いていただいても構いません。** Feel free to answer in English.
+
+        **現行の exe を検証できているのは開発機1台だけです**（RTX 5090 / Ryzen 9 5900XT / Windows 11）。
+        **他の環境で1回でも通ったという報告が、そのまま 1.0 に上げる条件になっています。**
+        うまく動いた報告も、動かなかった報告も同じくらい役に立ちます。
+
+        落ちた場合で原因を追ってほしいときは「不具合報告」のほうが情報が揃います。
+        こちらは**環境と結果の記録**として使ってください。
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: 結果
+      options:
+        - 最後まで通った（字幕ができた）
+        - 通ったが遅い・挙動が気になる
+        - 途中で落ちた
+        - 起動しなかった
+    validations:
+      required: true
+
+  - type: textarea
+    id: banner
+    attributes:
+      label: 起動バナーの1行
+      description: 版・torch・CUDA の認識・GPU 名がここに出ます。起動しなかった場合は空欄で構いません。
+      placeholder: "whisp-carrier 0.9.0 | torch 2.8.0+cu128 | CUDA: True | GPU: NVIDIA GeForce RTX 5090"
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      value: |
+        - GPU（VRAM）:
+        - NVIDIA ドライバ:
+        - CPU:
+        - RAM:
+        - OS / ビルド番号:
+        - exe 版 / スクリプト版:
+        - Amatsukaze から呼んでいるか（版も）:
+    validations:
+      required: true
+
+  - type: textarea
+    id: speed
+    attributes:
+      label: 素材と所要時間
+      description: |
+        ログの `[VAD] ... detected in Xs` と `[STT] Done in Xs` があれば貼ってください。
+        速度の目安が1台分しかないため、他の GPU での実測が欲しいところです。
+      placeholder: |
+        24分のアニメ（MKV / AAC）、モデルは既定の large-v3
+        [VAD] ten: 30 regions | 1246.7s of speech | detected in 7.1s
+        [STT] Done in 88.4s | dur=1246.7s | lang=ja (99.21%) | 412 segments
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: ログ（落ちた場合は必須）
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 気づいたこと
+      description: 導入でつまずいた点、ドキュメントで分かりにくかった箇所などがあれば。
+    validations:
+      required: false

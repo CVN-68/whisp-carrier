@@ -1,0 +1,160 @@
+name: 不具合報告（動かない・落ちる・出力が壊れる）
+description: 起動しない、途中で落ちる、字幕ファイルができない、といった動作の不具合。精度の話は「精度の報告」テンプレートへ。
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **英語で書いていただいても構いません。** Feel free to answer in English.
+
+        報告の前に3点だけ確認してください。ここで解決することが多いです。
+
+        - **Amatsukaze の whisper-model 欄が `自動` だと `-m large-v3-turbo` が渡ります。**
+          turbo は decoder を削ったモデルで、本プロジェクトの優位（ループ抑制・30秒超の修復・
+          タイムスタンプ）は decoder 側にあります。実行時に `[MODEL] NOTE:` が3行出ていたらこれです。
+        - **exe の隣に `whisp-carrier.yaml` があると自動で読まれます。**
+          `--no_config` を付けて再現するか確かめてください。
+        - **スクリプト版（`whisp_carrier.py` 直実行）は人柱版で動作保証はありません。**
+          サポート対象は exe 版です。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 確認したこと
+      options:
+        - label: 同じ内容の Issue が既にないか検索した
+          required: true
+        - label: README の該当する節（オプション一覧・終了コード・注意事項）を読んだ
+          required: true
+        - label: "`--no_config` を付けても再現するか確認した（設定ファイルを置いている場合）"
+          required: false
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: 使っているもの
+      options:
+        - exe 版（リリースのアーカイブを展開したもの）
+        - スクリプト版（whisp_carrier.py を Python から実行）
+        - どちらか分からない
+    validations:
+      required: true
+
+  - type: textarea
+    id: banner
+    attributes:
+      label: 起動バナーの1行
+      description: |
+        実行すると最初に出る行をそのまま貼ってください。版・torch・CUDA・GPU が1行に入っています。
+      placeholder: "whisp-carrier 0.9.0 | torch 2.8.0+cu128 | CUDA: True | GPU: NVIDIA GeForce RTX 5090"
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: caller
+    attributes:
+      label: 呼び出し方
+      options:
+        - Amatsukaze から
+        - PowerShell / コマンドプロンプトから直接
+        - whisp-carrier.bat 経由
+        - 自作のバッチ・スクリプトから
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: 実行したコマンド、または Amatsukaze の設定
+      description: |
+        Amatsukaze の場合は **whisper-option 欄の中身（空欄なら「空欄」と書く）** と
+        **whisper-model 欄（`自動` か、指定しているモデル名）**、Amatsukaze の版を書いてください。
+      placeholder: |
+        例1: whisp-carrier.exe "D:\rec\番組.mkv" -f srt --no_config
+        例2: Amatsukaze 1.0.8.5 / whisper-option 欄は空欄 / whisper-model 欄は 自動
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動作と、実際に起きたこと
+      placeholder: |
+        期待: 番組.srt ができる
+        実際: モデル読み込みの直後に終了し、srt ができない
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exit_code
+    attributes:
+      label: 終了コード
+      description: "0=全成功 / 1=1本以上失敗 or 入力が見つからない / 2=起動前エラー（設定ファイル・モデル解決・VAD 初期化）"
+      options:
+        - "0"
+        - "1"
+        - "2"
+        - 分からない
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: ログ全文
+      description: |
+        コンソール出力（Amatsukaze ならログファイル）を**省略せず**貼ってください。
+        `[VAD]` 行と `[STT] Done` 行、末尾のエラーが特に重要です。長い場合はファイル添付でも構いません。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: input
+    attributes:
+      label: 入力素材
+      description: |
+        中身の内容は不要です。**コンテナ・音声形式・尺**だけ書いてください。
+        特定の1本でしか起きないのか、どれでも起きるのかも分かれば助かります。
+      placeholder: |
+        MKV（音声 AAC 2ch 48kHz）、24分。手元の他の3本でも同じように落ちる。
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: バナーに出ない情報を補ってください。
+      value: |
+        - GPU（VRAM）:
+        - NVIDIA ドライバ:
+        - OS / ビルド番号:
+        - RAM:
+        - Amatsukaze の版（使っている場合）:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 再現性
+      options:
+        - 毎回起きる
+        - ときどき起きる
+        - 1回だけ起きた
+    validations:
+      required: false
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 設定ファイルの内容（`whisp-carrier.yaml` を置いている場合）
+      description: 置いていなければ空欄で構いません。
+      render: yaml
+    validations:
+      required: false

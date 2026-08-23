@@ -1,0 +1,45 @@
+name: 質問・使い方の相談
+description: 設定の書き方、オプションの選び方、Amatsukaze との組み合わせなど。
+title: "[q] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **英語で書いていただいても構いません。** Feel free to answer in English.
+
+        よく聞かれる点は先に書いておきます。
+
+        - **オプション欄は「空」が推奨です。** 既定が README に載せた精度を出した条件そのものです。
+          `--beam_size 10 --best_of 10` は旧 README が推奨として載せていましたが、
+          実測では9本中8本で既定と同等または悪化しました。書いてあれば消してください。
+        - **Amatsukaze の whisper-model 欄が `自動` だと `-m large-v3-turbo` が渡ります。**
+          別モデルで走るという意味です。`large-v3` を使いたい場合は明示してください。
+        - **exe 版でできないことは3つだけです**（transformers 形式モデルの変換、
+          `--ff_vocal_extract`、`--realign`）。指定すると理由を表示して止まります。
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 質問
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 試したこと・読んだ箇所
+      description: README / HANDOVER のどこを見たか、どのコマンドを試して何が起きたか。
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境（環境に依存する質問の場合）
+      value: |
+        - 起動バナーの1行:
+        - exe 版 / スクリプト版:
+        - 呼び出し方（Amatsukaze / 直接実行）:
+    validations:
+      required: false

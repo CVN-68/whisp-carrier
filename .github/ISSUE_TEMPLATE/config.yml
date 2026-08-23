@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使い方・オプション一覧・Amatsukaze の設定
+    url: https://github.com/CVN-68/whisp-carrier/blob/main/README.md
+    about: オプション、終了コード、設定ファイル、Amatsukaze 記載例、対象範囲（OP/ED・歌唱シーンは保証外）はここにあります。
+  - name: 設計判断・測定結果・既知の問題
+    url: https://github.com/CVN-68/whisp-carrier/blob/main/HANDOVER.md
+    about: 既定値をそう決めた根拠、素材15本の測定結果、未解決の問題。報告したい内容が「意図的な判断」として既に書かれている場合があります。
+  - name: English documentation
+    url: https://github.com/CVN-68/whisp-carrier/blob/main/README_en.md
+    about: The issue forms are in Japanese, but you can fill them in English. Reports in English are welcome.
