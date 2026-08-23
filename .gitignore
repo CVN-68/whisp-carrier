@@ -20,6 +20,10 @@ build/
 dist/
 build-full/
 dist-full/
+# WHISP_CARRIER_SLIM=1 (torch dropped). Same reason for a separate distpath:
+# verifying it must not overwrite the build the released archive came from.
+build-slim/
+dist-slim/
 *.manifest
 
 # IDE

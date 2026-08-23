@@ -131,7 +131,7 @@ MEDIA_EXTENSIONS = {
     ".ts", ".m2ts", ".mts",
 }
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 # ─────────────────────────────────────────────
 # Per-backend VAD threshold
@@ -158,15 +158,48 @@ def resolve_vad_threshold(method: str) -> float:
     """
     family = "ten" if method == "ten" else "silero"
     return VAD_THRESHOLD_DEFAULTS[family]
+# Device reporting, and the source of the `--device auto` decision.
+#
+# torch is asked first because the script version has it and it answers all
+# three questions, including the GPU name. It is not required though: inference
+# runs on CTranslate2 and the default VAD is a native library reached with
+# ctypes, so nothing on the normal path imports torch. The exe therefore does
+# not bundle it -- torch and the CUDA kernels it carries were 4.3 GB of a 4.7 GB
+# payload, spent on this banner and on silero, which lost to TEN VAD on all
+# fifteen references.
+#
+# ctranslate2 answers the one question that changes behaviour ("is there a usable
+# CUDA device"), so falling back to it keeps `--device auto` correct without
+# torch. The GPU name is cosmetic and is reported as unknown instead.
 TORCH_VERSION = ""
+CUDA_AVAILABLE = False
+CUDA_DEVICE_NAME = "N/A"
 try:
     import torch
     TORCH_VERSION = torch.__version__
     CUDA_AVAILABLE = torch.cuda.is_available()
     CUDA_DEVICE_NAME = torch.cuda.get_device_name(0) if CUDA_AVAILABLE else "N/A"
 except Exception:
-    CUDA_AVAILABLE = False
-    CUDA_DEVICE_NAME = "N/A"
+    try:
+        import ctranslate2
+        CUDA_AVAILABLE = ctranslate2.get_cuda_device_count() > 0
+        if CUDA_AVAILABLE:
+            CUDA_DEVICE_NAME = "(name unavailable without torch)"
+    except Exception:
+        pass
+
+
+def runtime_banner() -> str:
+    """One line naming the inference runtime actually in use.
+
+    Printed instead of the torch version, which was misleading even when torch
+    was bundled: it is not what runs the model.
+    """
+    try:
+        import ctranslate2
+        return f"ctranslate2 {ctranslate2.__version__}"
+    except Exception:
+        return "ctranslate2 (version unknown)"
 
 
 # ─────────────────────────────────────────────
@@ -964,12 +997,16 @@ def main() -> None:
     args = parser.parse_args(argv)
 
     if args.version:
-        print(f"whisp-carrier {VERSION} | torch {TORCH_VERSION} | CUDA: {CUDA_AVAILABLE} | GPU: {CUDA_DEVICE_NAME}")
+        _torch = f"torch {TORCH_VERSION}" if TORCH_VERSION else "torch not bundled"
+        print(f"whisp-carrier {VERSION} | {runtime_banner()} | {_torch} | "
+              f"CUDA: {CUDA_AVAILABLE} | GPU: {CUDA_DEVICE_NAME}")
         sys.exit(0)
 
     if args.checkcuda:
-        import torch
-        print(torch.cuda.device_count())
+        # Reports the device count CTranslate2 will actually use, which is the
+        # number that matters, and works without torch.
+        import ctranslate2
+        print(ctranslate2.get_cuda_device_count())
         sys.exit(0)
 
     if args.list_models:
@@ -1028,7 +1065,7 @@ def main() -> None:
     cache_root = Path(args.model_dir) if args.model_dir else whisp_config.base_dir() / "_models"
 
     print(f"whisp-carrier {VERSION}", flush=True)
-    print(f"torch {TORCH_VERSION} | device={device} | compute={compute_type}", flush=True)
+    print(f"{runtime_banner()} | device={device} | compute={compute_type}", flush=True)
     if CUDA_AVAILABLE:
         print(f"GPU: {CUDA_DEVICE_NAME}", flush=True)
 

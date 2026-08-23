@@ -4,10 +4,19 @@ whisp-carrier itself is MIT licensed (see `LICENSE`). This file lists everything
 else that ships inside a built distribution, with its origin and licence.
 
 Scope: the PyInstaller `onedir` build produced by `whisp_carrier.spec`, i.e. the
-contents of `dist/whisp-carrier/` (4.78 GB, of which roughly 4.5 GB is PyTorch
-and the CUDA libraries). Running from source pulls the same Python packages from
-your environment and additionally enables model conversion; only the bundled
-`ffmpeg.exe` is specific to the build.
+contents of `dist/whisp-carrier/` (2.24 GB, of which roughly 1.87 GB is the
+NVIDIA CUDA libraries CTranslate2 loads). Running from source pulls the same
+Python packages from your environment and additionally enables model conversion;
+only the bundled `ffmpeg.exe` is specific to the build.
+
+**PyTorch is no longer bundled (since 0.9.1).** Inference runs on CTranslate2 and
+the default VAD is a native library called through `ctypes`, so nothing on the
+normal path imported it; it accounted for 4.27 GB of the previous 4.78 GB build.
+The CUDA libraries below are still taken out of the `torch` wheel at build time,
+because that is where this project's build environment has them, but the `torch`
+Python package itself is not redistributed. Running from source still uses torch
+if it is installed (it is needed for the `silero_v3` / `silero_v4` / `silero_v5`
+VAD backends, which the exe therefore does not provide).
 
 Regenerating this list is described at the end.
 
@@ -49,13 +58,19 @@ Full provenance, including verification against the publisher's
 These arrive inside the `torch`, `ctranslate2` and `soundfile` wheels rather
 than being fetched separately. They dominate the size of the distribution.
 
+The CUDA entries are the ones CTranslate2 actually loads. `whisp_carrier.spec`
+copies them out of the `torch` wheel's `lib/` directory by name and drops the
+rest, so **cuFFT, cuRAND, cuSOLVER and cuSPARSE are no longer redistributed** —
+they were only there because torch used them. They sit at the root of
+`_internal/` rather than under `torch/lib/`, because the directory that used to
+be added to the DLL search path was added by `torch/__init__.py`.
+
 | Component | Origin | Licence |
 |---|---|---|
-| CUDA Runtime (`cudart64_12.dll`) | NVIDIA, via `torch==2.8.0+cu128` | [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/) — redistribution permitted under its terms |
-| cuBLAS / cuBLASLt | NVIDIA, via `torch` | NVIDIA CUDA Toolkit EULA |
-| cuFFT, cuRAND, cuSOLVER, cuSPARSE | NVIDIA, via `torch` | NVIDIA CUDA Toolkit EULA |
-| NVRTC (`nvrtc64_120_0.dll`) | NVIDIA, via `torch` | NVIDIA CUDA Toolkit EULA |
-| cuDNN 9 (`cudnn*64_9.dll`) | NVIDIA, via `torch` and `ctranslate2` | [NVIDIA cuDNN licence](https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html) |
+| CUDA Runtime (`cudart64_12.dll`) | NVIDIA, via the `torch==2.8.0+cu128` wheel | [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/) — redistribution permitted under its terms |
+| cuBLAS / cuBLASLt (`cublas64_12.dll`, `cublasLt64_12.dll`) | NVIDIA, via the `torch` wheel | NVIDIA CUDA Toolkit EULA |
+| NVRTC (`nvrtc64_120_0.dll`), nvJitLink (`nvJitLink_120_0.dll`) | NVIDIA, via the `torch` wheel | NVIDIA CUDA Toolkit EULA |
+| cuDNN 9 (`cudnn*64_9.dll`) | NVIDIA, via the `torch` wheel and `ctranslate2` | [NVIDIA cuDNN licence](https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html) |
 | Intel OpenMP (`libiomp5md.dll`) | Intel, via `ctranslate2` | [Intel Simplified Software License](https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html) |
 | CTranslate2 (`ctranslate2.dll`) | [OpenNMT/CTranslate2](https://github.com/OpenNMT/CTranslate2) | MIT |
 | **PyInstaller bootloader** (compiled into `whisp-carrier.exe`) | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | **GPL-2.0-or-later with the bootloader exception** — see section 5 |
@@ -79,6 +94,11 @@ No model weights are included in the executable.
 ---
 
 ## 4. Python packages
+
+This is the build environment, not the shipped set. Several entries are
+deliberately excluded from the exe and therefore not redistributed:
+`torch`, `torchaudio`, `silero-vad`, `transformers`, `audio-separator`,
+`openai-whisper` and the packages they pulled in. See section 6.
 
 | Package | Version | Licence | Project |
 |---|---|---|---|
@@ -224,6 +244,20 @@ unavailable because `pyannote.audio` is excluded on purpose (it drags in
 pytorch-lightning and speechbrain, and measured worse than the built-in silero).
 `vad._missing_backend` says so explicitly.
 
+**The torch-based silero backends.** `--vad_method silero_v3` / `silero_v4` /
+`silero_v5` need `torch`, `torchaudio` and the `silero-vad` package, none of
+which is bundled since 0.9.1. Dropping them removed 4.27 GB, and they lost to
+the default TEN VAD on all fifteen reference recordings.
+
+The built-in names are unaffected and stay available: `--vad_method
+silero_v5_fw` / `silero_v6_fw` run faster-whisper's own Silero v6 ONNX through
+`onnxruntime` and never touch torch. `vad._missing_backend` names the built-in
+alternative when one of the torch-based backends is asked for.
+
+Build `WHISP_CARRIER_WITH_TORCH=1` to get them back in a frozen build, which is
+what to use when re-measuring silero. `WHISP_CARRIER_FULL=1` implies it, because
+stable-ts needs torch too.
+
 ---
 
 ## Regenerating this list
@@ -240,7 +274,9 @@ Match those names against the installed environment's metadata
 (`importlib.metadata`) to recover versions and licences, since PyInstaller only
 copies `dist-info` for packages that need it at runtime (7 of them here).
 
-Also re-check `torch/lib` and `ctranslate2` for native libraries, `_internal`
+Also re-check the root of `_internal` and `ctranslate2` for native libraries
+(the CUDA DLLs moved there when torch stopped being bundled; there is no
+`torch/lib` any more, and the spec prints the list it kept), `_internal`
 for `ffmpeg.exe`, and `_tools/ffmpeg/PROVENANCE.txt` for the bundled ffmpeg's
 provenance. Grep the TOCs directly to confirm an exclusion actually took
 effect; a spec `excludes` entry that never matched fails silently.

@@ -16,7 +16,8 @@ exe cannot do is listed [below](#what-the-exe-build-cannot-do).
 
 ## Features
 
-- **RTX 5090 native** — torch 2.8.0+cu128, no compatibility fallback
+- **RTX 5090 native** — CTranslate2 on CUDA 12.8 / sm_120 in float16, with no
+  compatibility fallback and no need for `-ct float32`
 - **Amatsukaze compatible** — same CLI interface as faster-whisper-xxl.exe
 - **Model aliases** — `-m anime-whisper` for Japanese anime dialogue; any Hugging Face
   Whisper fine-tune is converted to CTranslate2 on first use
@@ -248,6 +249,7 @@ in `HANDOVER.md`. Each of them says so when invoked rather than failing obscurel
 | `--ff_vocal_extract` | no | yes | `audio-separator` is not bundled. Bundling it packaged cleanly but failed at runtime inside scipy, reporting a broken scipy installation that was not broken |
 | `--realign` | no | yes | `stable-ts` is not in the default build; `WHISP_CARRIER_FULL=1` includes it. It is skipped anyway whenever subtitle formatting is on, which the recommended settings enable |
 | `--vad_method pyannote_v3` / `pyannote_onnx_v3` | no | no | `pyannote.audio` is excluded on purpose: it pulls in pytorch-lightning and speechbrain, and measured worse than the built-in silero VAD |
+| `--vad_method silero_v3` / `silero_v4` / `silero_v5` | no | yes | `torch` is not bundled as of 0.9.1. It was 4.27 GB on its own, and these backends lost to the default TEN VAD on all fifteen reference recordings. The built-in names (`silero_v5_fw`, `silero_v6_fw`) run through onnxruntime and still work in the exe |
 
 **None of this affects accuracy.** Every figure this project reports was measured
 without any `--ff_*` filter, on `large-v3`, through the default TEN VAD path,
@@ -421,7 +423,7 @@ everything bundled, with licence texts, is in
 | **TEN VAD** | **Default voice activity detection** (`--vad_method ten`); its DLL is bundled | **Apache-2.0** | https://github.com/TEN-framework/ten-vad |
 | silero-vad | Alternative VAD (the previous default); faster-whisper's built-in v6 ONNX is the same model | MIT | https://github.com/snakers4/silero-vad |
 | onnxruntime | Runs that ONNX model | MIT | https://onnxruntime.ai |
-| PyTorch | GPU computation (CUDA 12.8 / sm_120 support) | BSD-3-Clause | https://pytorch.org/ |
+| PyTorch | **Not bundled as of 0.9.1.** Used by the script version for `silero_v3/v4/v5` and `--realign`; the bundled CUDA / cuDNN libraries are taken out of this wheel at build time | BSD-3-Clause | https://pytorch.org/ |
 | PyAV | Audio decoding (through faster-whisper) | BSD-3-Clause | https://github.com/PyAV-Org/PyAV |
 | ffmpeg | Audio preprocessing and filtering (run as a separate process) | **LGPL v3** (the bundled build) | https://ffmpeg.org/ |
 | libsndfile | Audio I/O (through `soundfile`) | **LGPL-2.1-or-later** | https://github.com/libsndfile/libsndfile |
@@ -432,8 +434,15 @@ everything bundled, with licence texts, is in
 | audio-separator | Vocal extraction (MDX / Mel-Band-Roformer); **script version only** | MIT | https://github.com/karaokenerds/python-audio-separator |
 | stable-ts | Timestamp realignment (experimental); **script version only** | MIT | https://github.com/jianfch/stable-ts |
 
-NVIDIA CUDA / cuDNN and Intel OpenMP are also bundled, arriving inside the `torch`
-and `ctranslate2` wheels; their redistribution terms are in THIRD-PARTY-NOTICES.md.
+NVIDIA CUDA / cuDNN and Intel OpenMP are also bundled. Only what CTranslate2
+actually loads ships — cuBLAS, cuDNN, NVRTC and nvJitLink — while cuFFT, cuRAND,
+cuSOLVER and cuSPARSE were dropped in 0.9.1 because only torch used them. Their
+redistribution terms are in THIRD-PARTY-NOTICES.md.
+
+**0.9.1 halves the download.** The extracted build went from 4.78 GB to 2.24 GB
+by not bundling PyTorch: inference runs on CTranslate2 and the default VAD is a
+native library, so neither used it. Output is unchanged — byte for byte identical
+to 0.9.0 on the same audio.
 
 Inspired by [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win) (Purfview) — a proprietary Whisper CLI with RTX 5090 support.  
 whisp-carrier reimplements equivalent functionality using only open-source components.

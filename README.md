@@ -16,7 +16,8 @@ Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソ�
 
 ## 特徴
 
-- **RTX 5090 ネイティブ動作** — torch 2.8.0+cu128、互換モード落ちなし
+- **RTX 5090 ネイティブ動作** — CTranslate2 + CUDA 12.8 / sm_120 を float16 のまま。
+  互換モード落ちも `-ct float32` の指定も不要
 - **Amatsukaze 対応** — faster-whisper-xxl.exe と同じCLIインターフェース
 - **TEN VAD が既定**（Apache-2.0）— silero より台詞の取りこぼしが少なく、
   TVアニメ録画15本すべてで silero 以上でした（24分もの9本で全文CER 19.3% → 16.1%、
@@ -41,6 +42,13 @@ Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソ�
 
 アーカイブを展開して、`whisp-carrier.exe` を好きな場所に置くだけです。
 Amatsukaze から呼ぶ場合は[Amatsukaze との連携](#amatsukaze-との連携)へ。
+
+**0.9.1 で展開後のサイズが 4.78GB → 2.24GB になりました。** PyTorch を同梱するのを
+やめたためです（推論は CTranslate2、既定のVADはネイティブライブラリなので、
+どちらも torch を使っていませんでした）。**精度は変わりません** — 同じ音声に対する
+出力が 0.9.0 とバイト単位で一致することを確認しています。
+影響するのは `--vad_method silero_v3/v4/v5` が exe から外れたことだけで、
+既定の TEN VAD と内蔵VAD（`silero_v5_fw`）はそのまま使えます。
 
 同梱物は exe のほかに `LICENSE` / `LICENSE.ffmpeg.txt` /
 `LICENSE.ten-vad.*.txt` / `THIRD-PARTY-NOTICES.md` /
@@ -328,7 +336,8 @@ profiles:
 |------|:------:|:-----------:|------------------|
 | 通常の文字起こし（`large-v3` 等） | ○ | ○ | — |
 | CTranslate2 形式のモデル・変換済みモデルの読み込み | ○ | ○ | — |
-| TEN VAD / silero 系・ループ抑制・字幕整形・設定ファイル | ○ | ○ | — |
+| TEN VAD（既定）・内蔵silero・ループ抑制・字幕整形・設定ファイル | ○ | ○ | — |
+| **`--vad_method silero_v3` / `silero_v4` / `silero_v5`** | × | ○ | `torch` 未同梱（0.9.1 から）。これだけで 4.27GB あり、**15本すべてで既定の TEN VAD に負けている**。内蔵VADの `silero_v5_fw` は exe でも動きます |
 | Amatsukaze 連携 | ○（検証済み） | △（`whisp-carrier.bat` 経由。**現行版は未検証**） | — |
 | **transformers 形式モデルの変換**（`-m anime-whisper` 等） | × | ○ | `transformers` 未同梱。変換は初回だけの作業なので、数百MBと未検証の実行経路を配布物に持ち込まない判断 |
 | **`--ff_vocal_extract`**（ボーカル抽出） | × | ○ | `audio-separator` 未同梱。同梱自体は成功するが実行時に scipy の拡張モジュールが読めず、しかも「scipy を再インストールせよ」という無関係な案内が出る |
@@ -362,7 +371,7 @@ profiles:
 | RAM | 32GB |
 | OS | Windows 11 (26200) |
 | Python | 3.11.9 |
-| PyTorch | 2.8.0+cu128 |
+| PyTorch | 2.8.0+cu128（**開発環境のみ。exe には同梱していません**） |
 | CUDA Driver | 591.44 / CUDA 13.1 |
 | CUDA Toolkit | 12.8.61 |
 | faster-whisper | 1.2.1 |
@@ -516,7 +525,7 @@ VAD区間数・発話秒数・セグメント数・抑制したループまで�
 | **TEN VAD** | **既定の音声区間検出**（`--vad_method ten`）。DLL を同梱 | **Apache-2.0** | https://github.com/TEN-framework/ten-vad |
 | silero-vad | 代替の音声区間検出（旧既定）。faster-whisper 内蔵の v6 ONNX も同じモデル | MIT | https://github.com/snakers4/silero-vad |
 | onnxruntime | 上の ONNX モデルの実行 | MIT | https://onnxruntime.ai |
-| PyTorch | GPU計算基盤（CUDA 12.8 / sm_120 対応） | BSD-3-Clause | https://pytorch.org/ |
+| PyTorch | **exe には同梱していません**（0.9.1 から）。スクリプト版で `silero_v3/v4/v5` と `--realign` に使用。同梱している CUDA / cuDNN はこの wheel から取り出したもの | BSD-3-Clause | https://pytorch.org/ |
 | PyAV | 音声デコード（faster-whisper 経由） | BSD-3-Clause | https://github.com/PyAV-Org/PyAV |
 | ffmpeg | 音声前処理・フィルタリング（別プロセスとして実行） | **LGPL v3**（同梱ビルド） | https://ffmpeg.org/ |
 | libsndfile | 音声の読み書き（`soundfile` 経由） | **LGPL-2.1-or-later** | https://github.com/libsndfile/libsndfile |
@@ -527,8 +536,10 @@ VAD区間数・発話秒数・セグメント数・抑制したループまで�
 | audio-separator | ボーカル抽出（MDX / Mel-Band-Roformer）。**スクリプト版のみ** | MIT | https://github.com/karaokenerds/python-audio-separator |
 | stable-ts | タイムスタンプ再調整（実験的）。**スクリプト版のみ** | MIT | https://github.com/jianfch/stable-ts |
 
-CUDA / cuDNN（NVIDIA）と Intel OpenMP も `torch` と `ctranslate2` の wheel 経由で
-同梱されています。再配布条件は THIRD-PARTY-NOTICES.md に記載しています。
+CUDA / cuDNN（NVIDIA）と Intel OpenMP も同梱されています。**同梱しているのは
+CTranslate2 が実際に読み込むもの（cuBLAS・cuDNN・NVRTC・nvJitLink）だけで、
+cuFFT / cuRAND / cuSOLVER / cuSPARSE は 0.9.1 で外しました**（torch が使っていた
+だけのため）。再配布条件は THIRD-PARTY-NOTICES.md に記載しています。
 
 開発のきっかけ：[Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)（Purfview作）のRTX 5090対応版が有料かつソース非公開だったため、同等機能をオープンソースのみで再実装したもの。
 
@@ -628,9 +639,13 @@ exe 版とスクリプト版で共通です。**スクリプト版でしか動�
 >
 > `--vad_method` で `silero_v4_fw` / `silero_v5_fw` / `silero_v6` / `silero_v6_fw` を
 > 指定した場合は faster-whisper の内蔵VADが動きますが、これらはすべて同じ
-> 内蔵 silero v6 に解決されます。`silero_v5` のように `_fw` が付かない名前は
-> 本ツール側でVADを走らせてから区間を渡す経路で、**実測では内蔵VADより
-> 全文CERで3pt良い**という結果でした。`pyannote_v3` / `auditok` / `webrtc` も
+> 内蔵 silero v6 に解決されます。**これらは exe でも動きます。**
+>
+> **`silero_v5` のように `_fw` が付かない名前は exe では使えません**（0.9.1 から）。
+> torch が必要で、それだけで配布物が 4.27GB 増えるうえ、**測定した15本すべてで
+> 既定の TEN VAD に負けています**。指定すると理由と代替（`silero_v5_fw`）を
+> 表示して止まります。スクリプト版では従来どおり動きます。
+> `pyannote_v3` / `auditok` / `webrtc` も
 > 指定できますが、いずれも既定より劣ります。
 
 ### 音声フィルター

@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # whisp-carrier PyInstaller spec file
 
+import os
 import sys
 from pathlib import Path
 import faster_whisper
@@ -12,13 +13,55 @@ block_cipher = None
 # Collect data files from key packages
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
+# ---------------------------------------------------------------------------
+# WHISP_CARRIER_SLIM=1 -- drop torch and ship only the CUDA libraries
+# CTranslate2 actually loads.
+#
+# Measured on the 0.9.0 build: _internal was 4.7 GB and torch was 4273 MB of it,
+# of which 4004 MB is bundled CUDA. Nothing on the default path uses torch --
+# inference is CTranslate2 (59 MB) and the default VAD is a native library
+# reached with ctypes (1.3 MB) -- so that payload was being spent on the version
+# banner and on the silero VAD backends, which lost to TEN VAD on all fifteen
+# references.
+#
+# It cannot simply be excluded, because site-packages has no nvidia-* wheels and
+# torch/lib is the only copy of cuBLAS and cuDNN on this machine; CTranslate2
+# resolves them from there today. So the DLLs are picked out by name and torch
+# itself is dropped, which keeps roughly 1.9 GB and discards roughly 2.3 GB
+# (torch_cuda 981 MB, torch_cpu 244 MB, cusparse 362 MB, cufft 263 MB,
+# cusolver 215+150 MB, curand 69 MB, the duplicate nvrtc .alt 83 MB).
+#
+# Opt-in rather than default because the released 0.9.0 archive was built
+# without it, and a packaging change of this size should not ride along
+# invisibly with a bug fix.
+# Adopted as the default on 2026-08-23, so the distributed build is the one this
+# spec produces with no environment set. It used to be opt-in, which was the
+# wrong way round: forgetting the variable silently produced a 4.8 GB archive.
+#
+# WHISP_CARRIER_FULL=1 keeps torch, because stable-ts (--realign) needs it.
+# WHISP_CARRIER_WITH_TORCH=1 keeps torch without pulling stable-ts in, which is
+# what to use when re-measuring the silero backends in a frozen build.
+FULL = os.environ.get('WHISP_CARRIER_FULL') == '1'
+WITH_TORCH = FULL or os.environ.get('WHISP_CARRIER_WITH_TORCH') == '1'
+SLIM = not WITH_TORCH
+if SLIM:
+    print('[spec] default (slim): dropping torch, keeping only the CUDA '
+          'libraries CTranslate2 loads')
+else:
+    print('[spec] WITH_TORCH: bundling torch and the silero VAD backends')
+
 datas = []
 datas += collect_data_files('faster_whisper')
 datas += collect_data_files('ctranslate2')
 datas += collect_data_files('tokenizers')
 datas += collect_data_files('huggingface_hub')
-datas += collect_data_files('silero_vad')
 datas += collect_data_files('numpy')
+# silero_vad loads its model through torch, so it goes when torch goes. The
+# built-in VAD names (--vad_method silero_v5_fw and friends) are unaffected:
+# those run faster-whisper's own silero v6 ONNX through onnxruntime and never
+# touch this package.
+if not SLIM:
+    datas += collect_data_files('silero_vad')
 
 # ---------------------------------------------------------------------------
 # TEN VAD (Apache-2.0), the default VAD since it beat silero on all nine
@@ -234,7 +277,6 @@ hiddenimports = [
     'ctranslate2',
     'tokenizers',
     'huggingface_hub',
-    'silero_vad',
     # The default VAD. vad.py imports it inside a function behind
     # try/except ImportError, so name it here rather than relying on the
     # analyser following that branch.
@@ -262,6 +304,9 @@ hiddenimports = [
     'winsound',
 ]
 
+if not SLIM:
+    hiddenimports.append('silero_vad')
+
 # Optional feature package: stable-ts, for --realign. Opt-in via
 # WHISP_CARRIER_FULL=1 because it is heavy and because keeping the base build
 # minimal makes it possible to tell a packaging regression apart from it.
@@ -279,7 +324,7 @@ hiddenimports = [
 # pyannote.audio stays in excludes below on purpose as well: it drags in
 # pytorch-lightning and speechbrain, and this project's own testing found
 # external VAD worse than the built-in silero.
-if os.environ.get('WHISP_CARRIER_FULL') == '1':
+if FULL:
     print('[spec] WHISP_CARRIER_FULL=1: bundling stable-ts (--realign)')
     hiddenimports += ['stable_whisper']
     datas += collect_data_files('stable_whisper')
@@ -341,19 +386,71 @@ _conversion_adjacent = [
     'optuna', 'pandas', 'sqlalchemy', 'sentencepiece', 'tiktoken',
     'onnx', 'whisper',
 ]
-if os.environ.get('WHISP_CARRIER_FULL') == '1':
+if FULL:
     print('[spec] WHISP_CARRIER_FULL=1: keeping '
           f'{len(_conversion_adjacent)} conversion-adjacent packages that '
           'audio-separator and stable-ts depend on')
 else:
     excludes += _conversion_adjacent
 
+# ---------------------------------------------------------------------------
+# SLIM: drop torch, carry over only the CUDA libraries CTranslate2 loads.
+#
+# The allowlist is by name rather than an explicit file list, so a cuDNN or
+# cuBLAS point release that renames or adds a component still gets carried. What
+# is deliberately left behind is torch's own runtime (torch_cuda, torch_cpu) and
+# the maths libraries only torch calls (cusparse, cufft, cusolver, curand).
+#
+# nvrtc and nvJitLink stay: cuDNN 9 compiles some engines at runtime and needs
+# them. The .alt copy is torch's second nvrtc and is not needed.
+#
+# Destination is the _internal root rather than torch/lib, because torch/lib was
+# only ever on the DLL search path thanks to torch/__init__.py calling
+# os.add_dll_directory on it. With torch gone nothing would add it, so the DLLs
+# have to sit where the bootloader already looks.
+binaries = []
+if SLIM:
+    excludes += ['torch', 'torchaudio', 'silero_vad']
+
+    _CUDA_KEEP = ('cublas64_', 'cublaslt64_', 'cudnn', 'cudart64_',
+                  'nvrtc64_', 'nvjitlink_')
+    try:
+        import torch as _torch_probe
+        _torch_lib = Path(_torch_probe.__file__).parent / 'lib'
+    except Exception as exc:
+        raise SystemExit(
+            f'[spec] WHISP_CARRIER_SLIM=1 needs to read the CUDA libraries out '
+            f'of the installed torch, but importing torch failed: {exc}\n'
+            'Either install torch in the build environment, or install the '
+            'nvidia-cublas-cu12 and nvidia-cudnn-cu12 wheels and point '
+            '_torch_lib at them.'
+        )
+
+    _kept_mb = _dropped_mb = 0
+    for _dll in sorted(_torch_lib.glob('*.dll')):
+        _name = _dll.name.lower()
+        _mb = _dll.stat().st_size / (1024 * 1024)
+        if _name.startswith(_CUDA_KEEP) and '.alt.' not in _name:
+            binaries.append((str(_dll), '.'))
+            _kept_mb += _mb
+        else:
+            _dropped_mb += _mb
+    if not binaries:
+        raise SystemExit(
+            f'[spec] no CUDA libraries matched under {_torch_lib}. CTranslate2 '
+            'needs cuBLAS and cuDNN at runtime, and shipping without them '
+            'would produce an exe that fails on the first encoder call. Check '
+            'the layout and update _CUDA_KEEP.'
+        )
+    print(f'[spec] SLIM: keeping {len(binaries)} CUDA libraries '
+          f'({_kept_mb:.0f} MB), dropping {_dropped_mb:.0f} MB of torch')
+
 a = Analysis(
     ['whisp_carrier.py'],
     # SPECPATH is injected by PyInstaller and always points at this spec's
     # directory, so the build does not break when the project folder is renamed.
     pathex=[SPECPATH],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -365,6 +462,31 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+if SLIM:
+    # Excluding the torch *module* does not stop PyInstaller from collecting
+    # torch's DLLs: it walks the binary dependency graph of the libraries added
+    # above and re-collects some of them under their original torch/lib path.
+    # The first SLIM build therefore shipped cublasLt64_12.dll (643 MB) and
+    # cudnn_ops64_9.dll (121 MB) twice, once at the _internal root and once in
+    # torch/lib, which is 766 MB of pure duplication.
+    #
+    # Dropping the torch/lib copies is safe because nothing adds that directory
+    # to the DLL search path any more (torch/__init__.py was what called
+    # os.add_dll_directory on it, and torch is gone).
+    _before = len(a.binaries)
+    _dropped = sum(
+        Path(_b[1]).stat().st_size
+        for _b in a.binaries
+        if _b[0].lower().startswith('torch' + os.sep)
+        and Path(_b[1]).is_file()
+    )
+    a.binaries = [
+        _b for _b in a.binaries
+        if not _b[0].lower().startswith('torch' + os.sep)
+    ]
+    print(f'[spec] SLIM: dropped {_before - len(a.binaries)} duplicate '
+          f'torch/lib binaries ({_dropped / (1024 * 1024):.0f} MB)')
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

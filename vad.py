@@ -32,6 +32,27 @@ def _frozen() -> bool:
     return getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
 
 
+def _ffmpeg_exe() -> str:
+    """Path to ffmpeg, preferring the copy bundled beside the exe.
+
+    Every call site here used to pass the bare string "ffmpeg", which only
+    resolves when the machine happens to have one on PATH. The exe bundles
+    ffmpeg and README states it is not needed separately, so on a clean machine
+    the *default* VAD path raised FileNotFoundError for any input that was not
+    already a 16 kHz mono WAV -- that is, for the intermediate AAC Amatsukaze
+    actually passes.
+
+    It went unnoticed because this development machine has ffmpeg on PATH
+    (WinGet) and because the regression fixture, test_speech.wav, is a WAV and
+    therefore never reaches the conversion branch.
+
+    audio_filter owns the lookup; imported here rather than duplicated so there
+    is one answer to "where is ffmpeg".
+    """
+    from audio_filter import get_ffmpeg_path
+    return get_ffmpeg_path()
+
+
 def _missing_backend(method: str, package: str, pip_name: str) -> ImportError:
     """Error for an unavailable VAD backend, worded for the current run mode."""
     if _frozen():
@@ -64,8 +85,17 @@ def get_speech_segments_silero(
     through a quiet passage instead of cutting there, which is the one knob
     between "keep the VAD" and "switch it off" (HANDOVER 測定結果 #17).
     """
-    import torch
-    import torchaudio
+    # torch is not bundled in the exe: it was 4.3 GB of the payload and the
+    # default path does not use it (CTranslate2 for inference, a native library
+    # for TEN VAD). The silero backends are the only feature that needs it, and
+    # they lost to TEN on all fifteen references, so they are script-version
+    # only now. Reported through _missing_backend so the message says that
+    # rather than surfacing a bare ImportError.
+    try:
+        import torch
+        import torchaudio
+    except ImportError:
+        raise _missing_backend(version, "torch/torchaudio", "torch torchaudio")
 
     # Only forwarded when set, so a silero build whose get_speech_timestamps
     # predates the argument keeps working. None is silero's own default anyway.
@@ -88,7 +118,7 @@ def get_speech_segments_silero(
                 import subprocess, tempfile as tf
                 tmp_wav = tf.NamedTemporaryFile(suffix=".wav", delete=False).name
                 subprocess.run([
-                    "ffmpeg", "-y", "-i", audio_path,
+                    _ffmpeg_exe(), "-y", "-i", audio_path,
                     "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav
                 ], capture_output=True, check=True)
                 work_path = tmp_wav
@@ -149,7 +179,7 @@ def get_speech_segments_silero(
     if not audio_path.lower().endswith(".wav"):
         tmp_wav = tf2.NamedTemporaryFile(suffix=".wav", delete=False).name
         subprocess.run([
-            "ffmpeg", "-y", "-i", audio_path,
+            _ffmpeg_exe(), "-y", "-i", audio_path,
             "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav
         ], capture_output=True, check=True)
         work_path = tmp_wav
@@ -198,32 +228,61 @@ def _load_wav_16k_mono(audio_path: str):
 
     Only used by the TEN backend. The silero paths keep their own copy of this
     so that adding a backend cannot perturb the recorded measurements.
+
+    Reads through soundfile rather than torchaudio. Nothing else on the default
+    path needs torch -- inference is CTranslate2 and TEN VAD is a native library
+    reached with ctypes -- so torchaudio here was the single import holding
+    4.3 GB of torch and bundled CUDA kernels in the exe payload. soundfile is
+    already bundled for the writers.
+
+    Resampling is delegated to ffmpeg instead of being done in-process, which
+    keeps this function free of a resampler dependency. The two paths that the
+    recorded numbers come from are unaffected: production input is Amatsukaze's
+    AAC, which was already converted by ffmpeg here, and the reference corpus is
+    16 kHz mono WAV from eval/prep.py, which is read directly and byte for byte
+    as before (soundfile and torchaudio both scale PCM_16 by 1/32768). Only an
+    odd-rate WAV changes resampler, and it now uses the same one prep.py used to
+    build the corpus in the first place.
     """
-    import subprocess
-    import tempfile
-    import torchaudio
+    import numpy as np
+    import soundfile as sf
+
+    # Convert unless it is already exactly what TenVad wants. Probing beats
+    # branching on the extension: a .wav at 48 kHz stereo used to be read and
+    # then silently resampled, and a non-.wav container was converted even when
+    # it held 16 kHz mono.
+    needs_convert = True
+    try:
+        info = sf.info(audio_path)
+        needs_convert = not (info.samplerate == 16000 and info.channels == 1)
+    except Exception:
+        # Not something soundfile can open (AAC, MKV, ...). ffmpeg handles it.
+        needs_convert = True
 
     work_path = audio_path
     tmp_wav = None
-    if not audio_path.lower().endswith(".wav"):
+    if needs_convert:
+        import subprocess
+        import tempfile
         tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
         subprocess.run([
-            "ffmpeg", "-y", "-i", audio_path,
+            _ffmpeg_exe(), "-y", "-i", audio_path,
             "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav
         ], capture_output=True, check=True)
         work_path = tmp_wav
 
-    waveform, sr = torchaudio.load(work_path)
-    if tmp_wav:
-        try:
-            os.unlink(tmp_wav)
-        except OSError:
-            pass
-    if sr != 16000:
-        waveform = torchaudio.functional.resample(waveform, sr, 16000)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    return waveform.squeeze().cpu().numpy()
+    try:
+        audio, _ = sf.read(work_path, dtype="float32", always_2d=False)
+    finally:
+        if tmp_wav:
+            try:
+                os.unlink(tmp_wav)
+            except OSError:
+                pass
+
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return np.ascontiguousarray(audio, dtype=np.float32)
 
 
 def segments_from_probabilities(
