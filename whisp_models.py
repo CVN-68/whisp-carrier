@@ -92,6 +92,38 @@ FALLBACK_BUILTIN_MODELS = {
 # Files worth carrying into the converted directory when the source has them.
 COPY_CANDIDATES = ("preprocessor_config.json", "tokenizer.json")
 
+# Variants that keep large-v3's encoder but cut the decoder down: turbo runs 4
+# decoder layers against large-v3's 32, and the distil family fewer still.
+#
+# Worth saying out loud rather than loading quietly, because the decoder is
+# exactly where this project's measured advantage lives. Loop hallucinations,
+# segments running past 30s and the timestamp tokens that place every cue are all
+# decoder work, and condition_on_previous_text is off here by design, so there is
+# no carried context to recover with. Faster, and not measured against the
+# reference set.
+#
+# The concrete way this arrives uninvited: Amatsukaze's whisper-model set to
+# 'auto' passes -m large-v3-turbo. Nobody typed it, and without this line the
+# only clue is the model name in the [MODEL] row.
+REDUCED_DECODER_HINTS = ("turbo", "distil")
+
+
+def _reduced_decoder_notice(source: str) -> List[str]:
+    """Lines warning that this model is not the one the figures come from."""
+    lowered = source.lower()
+    if not any(hint in lowered for hint in REDUCED_DECODER_HINTS):
+        return []
+    return [
+        f"[MODEL] NOTE: '{source}' is a reduced-decoder Whisper variant "
+        "(turbo runs 4 decoder layers against large-v3's 32).",
+        "[MODEL]   The accuracy figures this project publishes are large-v3. "
+        "This model is not measured against the reference set, and loop "
+        "hallucinations and over-long segments are decoder-side failures.",
+        "[MODEL]   Amatsukaze's whisper-model 'auto' resolves to "
+        "large-v3-turbo; pick large-v3 explicitly to match the published "
+        "numbers.",
+    ]
+
 
 class ModelError(Exception):
     """Raised for anything that stops a model from being made loadable."""
@@ -253,6 +285,7 @@ def resolve(
             )
     elif source in builtin_models():
         lines.append(f"[MODEL] built-in Whisper model: {source}")
+        lines.extend(_reduced_decoder_notice(source))
         return ResolvedModel(requested, source, spec, False, lines)
 
     quantization = quantization_for(compute_type, device)

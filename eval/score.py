@@ -362,6 +362,13 @@ def build_blocks(
 ) -> List[Block]:
     """Group consecutive text-bearing cues into blocks for alignment.
 
+    Block edges and the gap that separates two blocks both come from
+    Cue.speech_end rather than from the display end. An ARIB cue is on screen
+    until the next caption replaces it, so on the display end a caption held
+    through a theme song produced one block of ~110s carrying 11 reference
+    characters, and every character a recogniser emitted during the song was
+    charged against it. See the arib_vtt module docstring.
+
     Cues carrying a music symbol are dropped by default: the captions represent
     a sung passage with a mark rather than with the lyrics, so scoring a
     recogniser that does transcribe the singing against them measures nothing.
@@ -381,7 +388,7 @@ def build_blocks(
         blocks.append(
             Block(
                 start=current[0].start,
-                end=current[-1].end,
+                end=max(c.speech_end for c in current),
                 reference="".join(c.text for c in current),
             )
         )
@@ -404,8 +411,13 @@ def build_blocks(
         if previous_end is not None and cue.start - previous_end > 2.0:
             flush()
         current.append(cue)
-        previous_end = cue.end
-        if current[-1].end - current[0].start >= block_seconds:
+        # max(), not assignment: a cue carrying a lot of text can have a later
+        # speech_end than the cue that follows it, and letting the boundary walk
+        # backwards would invent a gap. These captions form a contiguous chain so
+        # it does not arise here, but the block edges should not depend on that.
+        previous_end = (cue.speech_end if previous_end is None
+                        else max(previous_end, cue.speech_end))
+        if previous_end - current[0].start >= block_seconds:
             flush()
             previous_end = None
     flush()
@@ -637,9 +649,17 @@ def main() -> None:
             cues: List[arib_vtt.Cue] = []
         else:
             cues, stats = arib_vtt.parse(vtt)
+            # "captioned" is speech time, not screen time. held_* reports the
+            # difference, which is captions left up after the speech ended; that
+            # time used to be scored as if the reference asserted speech there.
+            held = ""
+            if stats.held_cues:
+                held = (f" | {stats.held_cues} cue(s) held open past the speech,"
+                        f" {clock(stats.held_seconds)} total")
             lines.append(
                 f"  reference   {stats.text_cues} text cues | "
                 f"captioned {clock(stats.text_seconds)}"
+                f" of {clock(stats.screen_seconds)} on screen{held}"
             )
 
         # --- hallucination ---

@@ -8,8 +8,20 @@ Supports: silero_v4_fw, silero_v5_fw, silero_v3, silero_v4, silero_v5,
 from __future__ import annotations
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+# torchaudio 2.8 warns that load() will switch to TorchCodec in 2.9. All three
+# loaders below hit it, so it lands in the Amatsukaze log, where an unexplained
+# warning reads as a failure. Nothing here can act on it either: the call is
+# inside torchaudio and the switch is upstream's to make. Matched by message so
+# that a torchaudio warning about something real still gets through.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*load_with_torchcodec.*",
+    category=UserWarning,
+)
 
 # Segment = (start_sec, end_sec)
 Segment = Tuple[float, float]

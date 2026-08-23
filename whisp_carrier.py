@@ -21,7 +21,17 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from faster_whisper import WhisperModel
+# huggingface_hub warns, on the first download of any model, that this machine
+# cannot make symlinks so its cache will use more disk. It is four lines of
+# English in the middle of the Amatsukaze log at the worst possible moment (a
+# first run), and there is nothing the reader can do about it: symlinks need
+# Developer Mode or an elevated shell on Windows. Caching still works.
+#
+# Set before faster_whisper pulls huggingface_hub in, and with setdefault so
+# that anyone who deliberately asked for the warning still gets it.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+from faster_whisper import WhisperModel  # noqa: E402  (must follow the env var)
 from tqdm import tqdm
 
 import loop_filter
@@ -122,6 +132,32 @@ MEDIA_EXTENSIONS = {
 }
 
 VERSION = "0.1.0"
+
+# ─────────────────────────────────────────────
+# Per-backend VAD threshold
+#
+# The speech probability a VAD emits is on a model-specific scale, so one number
+# does not carry across. Measured on 死亡遊戯 #09, which is the reference that
+# loses the most speech: TEN at silero's 0.45 recovers the missing speech
+# (coverage 59.7% -> 73.1%) but drops precision to 74.6%, and 0.75 keeps the
+# recall while holding precision at 83.2% (whole-region CER 39.3% -> 30.5%).
+# 0.90 was measured on four references and lost on the total, so 0.75 it is.
+#
+# --vad_threshold defaults to None and is resolved here, rather than carrying a
+# single default that would be wrong for whichever backend is not selected.
+# ─────────────────────────────────────────────
+VAD_THRESHOLD_DEFAULTS = {"ten": 0.75, "silero": 0.45}
+
+
+def resolve_vad_threshold(method: str) -> float:
+    """The default --vad_threshold for this backend.
+
+    'precomputed' takes regions from a file, so the threshold only reaches the
+    shared aggregation and any value behaves the same; it gets the silero number
+    so that comparisons against silero stay like-for-like.
+    """
+    family = "ten" if method == "ten" else "silero"
+    return VAD_THRESHOLD_DEFAULTS[family]
 TORCH_VERSION = ""
 try:
     import torch
@@ -326,6 +362,12 @@ def transcribe_file(
     if args.vad_filter and args.vad_method not in builtin_vad_methods:
         from vad import get_speech_segments
         print(f"  [VAD] Running {args.vad_method}...", flush=True)
+        # Timed because the cost of the VAD itself is invisible otherwise: it
+        # runs inside this function, so it is folded into the [STT] Done total.
+        # TEN steps a native call every 256 samples from Python, which is fine
+        # on a 24 minute file and unknown on a 5 hour one, and no threshold or
+        # routing choice can change it. See HANDOVER 次の着手 I.
+        vad_started = time.time()
         speech_segs = get_speech_segments(
             audio_path,
             method=args.vad_method,
@@ -339,6 +381,17 @@ def transcribe_file(
             neg_threshold=args.vad_neg_threshold,
             segments_json=args.vad_segments_json,
         )
+        vad_elapsed = time.time() - vad_started
+        if speech_segs:
+            # Speech seconds were only reported on the collect path, by
+            # describe_external() after the fact, so the clip path gave no way
+            # to read a speech ratio out of a production log.
+            speech_seconds = sum(end - start for start, end in speech_segs)
+            print(
+                f"  [VAD] {args.vad_method}: {len(speech_segs)} regions | "
+                f"{speech_seconds:.1f}s of speech | detected in {vad_elapsed:.1f}s",
+                flush=True,
+            )
         if not speech_segs:
             # Previously this produced an empty clip_timestamps string, which
             # faster-whisper reads as "no restriction" and quietly transcribes
@@ -506,7 +559,9 @@ def process_single_file(
         t0 = time.time()
         segments, info = transcribe_file(audio_input, engine, args)
         elapsed = time.time() - t0
-        print(f"  [STT] Done in {elapsed:.1f}s | lang={info['language']} ({info['language_probability']:.2%}) | {len(segments)} segments", flush=True)
+        # Audio duration is echoed so the speech seconds on the [VAD] line above
+        # can be read as a ratio without opening the JSON.
+        print(f"  [STT] Done in {elapsed:.1f}s | dur={info['duration']:.1f}s | lang={info['language']} ({info['language_probability']:.2%}) | {len(segments)} segments", flush=True)
 
         # Drop segments that are one thing repeated. This runs before the
         # duration repair below because a loop never needs splitting, and
@@ -730,7 +785,14 @@ def build_parser() -> argparse.ArgumentParser:
     # VAD
     p.add_argument("--vad_filter", "-vad",
                    type=lambda x: x.lower() != "false", default=True)
-    p.add_argument("--vad_threshold", type=float, default=0.45)
+    p.add_argument("--vad_threshold", type=float, default=None,
+                   help="Speech probability above which the VAD opens. Left "
+                        "unset it resolves per backend, because the scale is "
+                        f"model-specific: {VAD_THRESHOLD_DEFAULTS['ten']} for "
+                        f"TEN VAD and {VAD_THRESHOLD_DEFAULTS['silero']} for "
+                        "silero. The same number does not mean the same "
+                        "strictness across the two, so a value tuned on one is "
+                        "wrong on the other.")
     p.add_argument("--vad_neg_threshold", type=float, default=None,
                    help="End-of-speech probability for the silero VAD. Speech "
                         "starts above --vad_threshold and only ends below this, "
@@ -747,19 +809,23 @@ def build_parser() -> argparse.ArgumentParser:
                         "in vad.py: the built-in VAD hardcodes 512 samples and "
                         "silero-vad 5.x/6.x no longer accept the argument.")
     p.add_argument("--vad_method",
-                   default="silero_v5_fw",
+                   default="ten",
                    choices=["silero_v4_fw", "silero_v5_fw", "silero_v3", "silero_v4",
                             "silero_v5", "silero_v6", "silero_v6_fw",
                             "ten", "precomputed",
                             "pyannote_v3", "pyannote_onnx_v3",
                             "auditok", "webrtc"],
-                   help="VAD backend. The *_fw names all run faster-whisper's "
-                        "bundled model regardless of the version in the name; "
-                        "use --vad_onnx to actually change it. 'ten' is TEN VAD "
-                        "(Apache-2.0), a different model family, segmented with "
-                        "the same rules as silero so the two are comparable. "
-                        "'precomputed' reads regions from --vad_segments_json, "
-                        "for segmenters that cannot be installed here.")
+                   help="VAD backend. Defaults to 'ten' (TEN VAD, Apache-2.0), "
+                        "which beat silero on all nine references: 19.3% -> "
+                        "16.1% whole-region CER, coverage 82.6% -> 86.6%, and "
+                        "it wins on eight of the nine files. Segmentation is "
+                        "silero's aggregation either way, so only the model "
+                        "differs. 'silero_v5' is the previous default. The *_fw "
+                        "names all run faster-whisper's bundled model "
+                        "regardless of the version in the name; use --vad_onnx "
+                        "to actually change it. 'precomputed' reads regions "
+                        "from --vad_segments_json, for segmenters that cannot "
+                        "be installed here.")
     p.add_argument("--vad_segments_json", default=None, metavar="PATH",
                    help="Speech regions for --vad_method precomputed, as "
                         "{\"<wav stem>\": [[start, end], ...]}. Rasterised onto "
@@ -931,6 +997,14 @@ def main() -> None:
     # and so explicit width/count values survive the expansion.
     explicit = whisp_config.cli_specified(build_parser, argv) | set(cfg.applied)
     apply_presets(args, explicit)
+
+    # Resolve the VAD threshold after the config file and presets, so that a
+    # value set in whisp-carrier.yaml still wins and only an unset one is filled
+    # in. See VAD_THRESHOLD_DEFAULTS for why this is per backend.
+    if args.vad_threshold is None:
+        args.vad_threshold = resolve_vad_threshold(args.vad_method)
+        print(f"[VAD] threshold {args.vad_threshold} "
+              f"(default for {args.vad_method})", flush=True)
 
     # Device selection
     device = args.device

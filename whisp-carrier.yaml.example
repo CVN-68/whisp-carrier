@@ -27,8 +27,8 @@
 # ------------------------------------------------------------
 # override: CLI と競合したときにどちらを優先するか
 #
-#   true  … このファイルを優先する。Amatsukaze が渡してくる
-#           オプションを無視して、ここの値で上書きする。
+#   true  … このファイルを優先する。呼び出し側（Amatsukaze の whisper-option 欄
+#           など）が渡したオプションを無視して、ここの値で上書きする。
 #   false … CLI 指定を優先する。このファイルは CLI が
 #           指定しなかった項目を埋めるだけになる。
 #
@@ -50,9 +50,11 @@ active_profile: anime
 
 # 品質。**既定の 5 のままにしてある。**
 #
-# Amatsukaze は --beam_size 10 --best_of 10 を渡してくるので、override: true と
-# あわせてここで 5 に戻す意味がある。24分アニメ9本を同一素材で比較した実測
-# （HANDOVER 測定結果 #13）:
+# **普通はこの2行は要らない。** Amatsukaze の whisper-option 欄を空にすれば
+# 既定の 5 が入る。欄に --beam_size 10 --best_of 10 が入っている場合だけ、
+# override: true とあわせてここで 5 に戻す意味がある（欄を直せるならそのほうが素直）。
+#
+# 24分アニメ9本を同一素材で比較した実測（HANDOVER 測定結果 #13）:
 #   beam 5   全文CER 22.0% / カバレッジ 80.3%   ← これ
 #   beam 10  全文CER 22.3% / カバレッジ 80.1%
 # 9本中8本で beam 10 が同等または悪化した。時間は +2.8% しか変わらないので、
@@ -60,14 +62,20 @@ active_profile: anime
 beam_size: 5
 best_of: 5
 
-# VAD。外部 silero を使い、区間は clip_timestamps で渡す（clip は既定なので
-# 書かなくてよい）。**この1行が精度に一番効く。**
+# VAD。**既定が TEN VAD になったので、この節は普通は書かなくてよい。**
 #
-# 無指定だと既定の silero_v5_fw、つまり faster-whisper の内蔵VAD経路になる。
-# 24分アニメ9本の実測では、内蔵は発話を2割落として全文CER 27.1%、
-# こちらは 24.3%（カバレッジ 74.1% 対 80.4%）。Amatsukaze は --vad_method を
-# 渡してこないので、ここに書かないと測定で最良だった構成にならない。
-vad_method: silero_v5
+# 24分アニメ9本の実測（歌唱除外、参照35,036字）:
+#   ten（既定）  全文CER 16.1% / カバレッジ 86.6% / 精度 90.0%
+#   silero_v5    全文CER 19.3% / カバレッジ 82.6% / 精度 91.1%
+#   本家XXL      全文CER 20.5% / カバレッジ 82.3% / 精度 89.3%
+# TEN は9本中8本で silero に勝ち、1本（Summer Pockets）が同値。
+# 効きは素材で桁違いに違い、会話劇では 0.1〜1.4pt だが子供向け・低発話率では
+# 13〜18pt 動く（おねがいアイプリ −17.2pt、死亡遊戯 −11.9pt）。
+#
+# 旧既定に戻したいときだけ次を有効にする。**--vad_threshold は書かないこと。**
+# 確率スケールがモデル固有なので、未指定なら ten=0.75 / silero=0.45 が
+# バックエンド別に自動で入る。片方に合わせた数値はもう片方では間違いになる。
+# vad_method: silero_v5
 
 
 # ============================================================
@@ -79,8 +87,18 @@ vad_method: silero_v5
 #                            # anime-whisper / kotoba-v2 などのエイリアスや、
 #                            # Hugging Face のリポジトリIDも指定できる。
 #                            # 一覧は --list_models で表示。
-#                            # Amatsukaze は -m を自分で渡してくるので、
-#                            # モデルを変えるときは override: true と併用する。
+#                            # Amatsukaze の whisper-model 欄でモデルを選ぶと -m が
+#                            # 渡ってくるので、ここで変えるなら欄を「未指定」にするか、
+#                            # override: true と併用する。
+#
+#                            # ★ Amatsukaze の whisper-model を「自動」にしている場合は
+#                            #    -m large-v3-turbo が渡ってきます（実機で確認）。
+#                            #    turbo は large-v3 の decoder を 32層→4層に削ったモデルで、
+#                            #    公表している精度は large-v3 のものです。turbo は未測定。
+#                            #    欄を「large-v3」にするのがいちばん素直ですが、
+#                            #    欄を触らず打ち消すなら次の2行を有効にしてください。
+# model: large-v3
+# （※このときは上の override: true が必要）
 # model_dir: null            # モデル保存先。null で自動
 # device: auto               # cuda / cpu / auto
 # compute_type: default      # float16 / int8 / int8_float16 / float32 ...
@@ -111,9 +129,12 @@ vad_method: silero_v5
 # hallucination_silence_threshold: 0  # 0=無効。アニメ素材では正常セグメントも消えるため非推奨
 
 # --- VAD ----------------------------------------------------
-# vad_method は上の共通設定で silero_v5 にしてある（理由もそこに書いた）。
+# vad_method は既定の ten のまま。切り替えの話は上の共通設定に書いた。
 # vad_filter: true
-# vad_threshold: 0.45        # 実測で最良。0.30 / 0.15 は試して悪化した
+# vad_threshold: 0.75        # 無指定推奨。ten=0.75 / silero=0.45 が自動で入る。
+#                            # ten は 0.45 だと精度が 74.6% まで落ち、0.90 は
+#                            # 4本合計で +1.3pt 悪化した。silero は 0.45 が最良で
+#                            # 0.30 / 0.15 は試して悪化した
 # vad_min_speech_duration_ms: 250
 # vad_max_speech_duration_s: null
 # vad_min_silence_duration_ms: 3000   # 500 / 100 も試したが悪化した

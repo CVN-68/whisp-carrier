@@ -21,6 +21,65 @@ datas += collect_data_files('silero_vad')
 datas += collect_data_files('numpy')
 
 # ---------------------------------------------------------------------------
+# TEN VAD (Apache-2.0), the default VAD since it beat silero on all nine
+# references. Its wheel ships a prebuilt DLL that ten_vad/__init__.py loads with
+#
+#     CDLL(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+#                       "lib/Windows/x64/ten_vad.dll"))
+#
+# so the DLL has to keep its position *relative to the package*. That rules out
+# collect_dynamic_libs(), which flattens libraries into _internal and would leave
+# the ctypes lookup failing at runtime with a FileNotFoundError naming a path
+# that does not exist. Frozen onedir sets the package __file__ under
+# sys._MEIPASS, which is _internal, so shipping it as data at
+# ten_vad/lib/Windows/x64 lands exactly where the lookup goes.
+#
+# Only the Windows x64 library is bundled. The wheel also carries a Linux .so
+# and a macOS framework, and collect_data_files would take all three.
+# ---------------------------------------------------------------------------
+import ten_vad as _ten_vad
+
+_TEN_VAD_SUBDIR = 'lib/Windows/x64'
+_ten_vad_dll = Path(_ten_vad.__file__).parent / 'lib' / 'Windows' / 'x64' / 'ten_vad.dll'
+if not _ten_vad_dll.is_file():
+    raise SystemExit(
+        f'[spec] ten_vad.dll not found at {_ten_vad_dll}.\n'
+        'The default VAD needs it. Install the wheel with\n'
+        '  pip install ten-vad==1.0.6.8\n'
+        'or, if the layout changed, update _TEN_VAD_SUBDIR to match.'
+    )
+datas += [(str(_ten_vad_dll), f'ten_vad/{_TEN_VAD_SUBDIR}')]
+print(f'[spec] ten_vad dll: {_ten_vad_dll} -> ten_vad/{_TEN_VAD_SUBDIR}')
+
+# Apache-2.0 section 4 asks for the licence and any NOTICE file to travel with
+# the work. The wheel carries both in its dist-info and they are copied next to
+# the exe after COLLECT, the same way ffmpeg's licence is.
+#
+# rglob, not glob: this wheel puts them under dist-info/licenses/ rather than at
+# the top of dist-info, which is where recent packaging tools place them. A
+# non-recursive lookup found nothing and only printed a warning, so the first
+# build shipped the DLL without its licence.
+TEN_VAD_LICENCES = []
+for _dist in Path(_ten_vad.__file__).parent.parent.glob('ten_vad-*.dist-info'):
+    for _name in ('LICENSE', 'NOTICES'):
+        for _candidate in _dist.rglob(_name):
+            if _candidate.is_file():
+                TEN_VAD_LICENCES.append(
+                    (_candidate, f'LICENSE.ten-vad.{_name.lower()}.txt')
+                )
+                break
+if not TEN_VAD_LICENCES:
+    raise SystemExit(
+        '[spec] no LICENSE/NOTICES found in the ten-vad dist-info.\n'
+        'Apache-2.0 requires them to ship alongside the binary, and the DLL is '
+        'bundled unconditionally, so this is a licensing defect rather than a '
+        'warning. Locate them under site-packages/ten_vad-*.dist-info and '
+        'update the lookup.'
+    )
+for _src, _name in TEN_VAD_LICENCES:
+    print(f'[spec] ten-vad licence: {_src}')
+
+# ---------------------------------------------------------------------------
 # ffmpeg.exe
 #
 # This project is MIT. ffmpeg is not, so *which* ffmpeg build gets bundled is a
@@ -176,6 +235,10 @@ hiddenimports = [
     'tokenizers',
     'huggingface_hub',
     'silero_vad',
+    # The default VAD. vad.py imports it inside a function behind
+    # try/except ImportError, so name it here rather than relying on the
+    # analyser following that branch.
+    'ten_vad',
     'tqdm',
     'numpy',
     'numpy._core',
@@ -356,7 +419,18 @@ if FFMPEG_LICENSE_SRC.is_file():
     shutil.copy2(FFMPEG_LICENSE_SRC, _target)
     print(f'[spec] copied ffmpeg licence to: {_target}')
 
-for _name in ('LICENSE', 'THIRD-PARTY-NOTICES.md'):
+# TEN VAD, Apache-2.0. Same reasoning as ffmpeg: beside the exe, not buried in
+# _internal, because that is where a reader looks.
+for _src, _name in TEN_VAD_LICENCES:
+    _target = _dist_root / _name
+    shutil.copy2(_src, _target)
+    print(f'[spec] copied ten-vad {_src.name} to: {_target}')
+
+# README.md travels with the archive too. Someone who downloads the release and
+# never visits the repository would otherwise have no instructions at all, and
+# README.md is the Japanese user-facing manual written against this exe build
+# (README_en.md is a summary and stays in the repository).
+for _name in ('LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md'):
     _src = Path(SPECPATH) / _name
     if _src.is_file():
         shutil.copy2(_src, _dist_root / _name)

@@ -9,6 +9,12 @@ faster-whisper>=1.2.1
 transformers>=4.56
 safetensors>=0.4
 audio-separator>=0.44.0
+# 既定のVAD（--vad_method ten）。Apache-2.0、1.3MB。wheel に prebuilt な
+# ten_vad.dll が入っていて ctypes で読む形なので、exe では spec が
+# ten_vad/lib/Windows/x64 に配置している。
+# 9本で silero に対し全文CER 19.3% → 16.1%、カバレッジ 82.6% → 86.6%。
+ten-vad==1.0.6.8
+# --vad_method silero_* 用。既定ではないが切り替え先として残している。
 silero-vad>=5.1.0
 stable-ts>=2.16.0
 ffmpeg-python==0.2.0

@@ -30,6 +30,30 @@ Cue end times are not speech end times. Because of the contiguous chain an end
 time only means "this is when the next caption replaced it", so it must not be
 used to score timestamp accuracy. Gaps between text-bearing cues are meaningful,
 since those come from a deliberate clear.
+
+That last paragraph was written as a warning and then walked into one layer up.
+text_regions() built its caption-on-screen spans from (start, end), and score.py
+derived both the no-caption gaps and the CER blocks from those, so a caption held
+on screen through a theme song hid the silence from the 20s gap rule. Two cues
+did most of the damage:
+
+    公女殿下 #10   00:41.0  「フェリシア！？大丈夫！？」   8 chars held 105.0s
+    クレバテス #06  01:17.3  「やっぱりこのハイデンは…」  25 chars held 106.6s
+
+Each produced one CER block of about 110s carrying 11 and 70 reference
+characters, and every character a recogniser emitted during the song inside them
+was charged as invention. Configurations that transcribe singing were penalised
+for output in time the reference says nothing about, which is the very thing the
+gap rule exists to prevent.
+
+So a cue now also carries speech_end: the display end capped by how long the
+speech behind it can plausibly have run. The bound is read off the material
+rather than guessed. Across 23,848 text cues in the 15 references the hold per
+character is 0.24s at the median and 1.17s at p95, and only 88 cues (0.37%) are
+held for 20s or more. See _eval/_cue_length.txt.
+
+speech_end only ever shortens a cue, never extends it, so a caption that is
+replaced promptly is untouched.
 """
 
 from __future__ import annotations
@@ -70,6 +94,42 @@ SPEAKER_COLON_RE = re.compile(r"^([^\s:：（）()]{1,10})[:：]")
 
 FULLWIDTH_DIGITS = "０１２３４５６７８９"
 
+# ---------------------------------------------------------------------------
+# How long the speech behind a cue can have lasted.
+#
+# Measured, not guessed (_eval/_cue_length.txt, 23,848 text cues over the 15
+# references): 0.24 s/char at the median, 0.71 at p90, 1.17 at p95.
+#
+# PER_CHAR sits at p95 so 95% of cues keep their full on-screen span. MIN keeps
+# very short cues from being clipped below a plausible utterance. MAX is the
+# backstop for the actual failure mode, a caption held through a song: the
+# offenders run 4 to 54 seconds per character, so a ratio bound alone does not
+# catch them (25 chars would still buy 30s). It is set to score.py's gap
+# threshold, because a hold longer than that is exactly what should have been
+# reported as a no-caption region in the first place, and only 0.37% of cues are
+# held that long.
+# ---------------------------------------------------------------------------
+SPEECH_SECONDS_PER_CHAR = 1.2
+SPEECH_SECONDS_MIN = 2.0
+SPEECH_SECONDS_MAX = 20.0
+
+
+def speech_budget(text: str) -> float:
+    """Longest plausible speech duration for this much caption text.
+
+    Whitespace is excluded and everything else counted, including speaker labels
+    and bracket markup. Over-counting characters only makes the budget more
+    generous, which is the safe direction: the point is to catch a caption held
+    for two orders of magnitude too long, not to model reading speed.
+    """
+    chars = sum(1 for ch in text if not ch.isspace())
+    if chars == 0:
+        return SPEECH_SECONDS_MIN
+    return min(
+        SPEECH_SECONDS_MAX,
+        max(SPEECH_SECONDS_MIN, chars * SPEECH_SECONDS_PER_CHAR),
+    )
+
 
 def parse_timestamp(value: str) -> float:
     value = value.replace(",", ".")
@@ -91,11 +151,34 @@ class Cue:
 
     @property
     def duration(self) -> float:
+        """Seconds the caption was on screen. Not the duration of the speech."""
         return max(0.0, self.end - self.start)
 
     @property
     def has_text(self) -> bool:
         return bool(self.text.strip())
+
+    @property
+    def speech_end(self) -> float:
+        """End of the speech behind this cue, rather than of its display.
+
+        The display end is when the next caption replaced this one, so on a cue
+        that was never replaced it can run for minutes. Anything deriving silence
+        or a scoring window from a cue wants this instead. See the module
+        docstring for what using the display end cost.
+        """
+        if not self.has_text:
+            return self.end
+        return min(self.end, self.start + speech_budget(self.text))
+
+    @property
+    def speech_duration(self) -> float:
+        return max(0.0, self.speech_end - self.start)
+
+    @property
+    def held(self) -> float:
+        """Seconds the caption stayed up after the speech could plausibly end."""
+        return max(0.0, self.end - self.speech_end)
 
 
 @dataclass
@@ -103,7 +186,12 @@ class Stats:
     cues: int = 0
     text_cues: int = 0
     empty_cues: int = 0
+    # Speech time behind the text cues, and the screen time they occupied. The
+    # gap between the two is the caption-held-open effect; held_* isolates it.
     text_seconds: float = 0.0
+    screen_seconds: float = 0.0
+    held_cues: int = 0
+    held_seconds: float = 0.0
     ruby_runs: int = 0
     ruby_chars: int = 0
     drcs: int = 0
@@ -234,7 +322,13 @@ def _survey(cues: List[Cue], stats: Stats) -> None:
             continue
 
         stats.text_cues += 1
-        stats.text_seconds += cue.duration
+        # Speech time, not screen time. The two differ by 15 minutes on some
+        # references and the difference used to land in the CER.
+        stats.text_seconds += cue.speech_duration
+        stats.screen_seconds += cue.duration
+        if cue.held > 0.5:
+            stats.held_cues += 1
+            stats.held_seconds += cue.held
 
         for line in cue.text.splitlines():
             line = line.strip()
@@ -266,12 +360,19 @@ def _survey(cues: List[Cue], stats: Stats) -> None:
 
 
 def text_regions(cues: List[Cue]) -> List[Tuple[float, float]]:
-    """Merged (start, end) spans of the cues that actually carry text.
+    """Merged spans where the reference asserts that speech happened.
 
-    These are the regions a caption was on screen. The complement is where a
-    clear was issued, which is what the hallucination count is scored against.
+    Built from speech_end, not from the display end. The complement is where the
+    reference says nothing, which is what the hallucination count is scored
+    against and what gets cut out of the CER.
+
+    Using the display end here was the bug described in the module docstring: a
+    caption held through a theme song claimed the whole song as captioned time.
     """
-    spans = [(c.start, c.end) for c in cues if c.has_text and c.end > c.start]
+    spans = [
+        (c.start, c.speech_end) for c in cues
+        if c.has_text and c.speech_end > c.start
+    ]
     spans.sort()
     merged: List[List[float]] = []
     for start, end in spans:

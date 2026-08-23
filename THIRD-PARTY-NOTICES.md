@@ -67,6 +67,7 @@ than being fetched separately. They dominate the size of the distribution.
 
 | Item | Bundled? | Origin | Licence |
 |---|---|---|---|
+| TEN VAD (`ten_vad/lib/Windows/x64/ten_vad.dll`) | **Yes** | [TEN-framework/ten-vad](https://github.com/TEN-framework/ten-vad), the prebuilt library inside the `ten-vad` wheel | Apache-2.0 |
 | Silero VAD v6 (`faster_whisper/assets/silero_vad_v6.onnx`) | **Yes** | [snakers4/silero-vad](https://github.com/snakers4/silero-vad), redistributed inside the `faster-whisper` package | MIT |
 | Whisper `large-v3` and other sizes | No | Downloaded at first run from [Hugging Face](https://huggingface.co/Systran) | MIT (weights, OpenAI) |
 | `litagin/anime-whisper` | No | [Hugging Face](https://huggingface.co/litagin/anime-whisper); the exe cannot convert it, see section 6 | See the model card |
@@ -131,6 +132,7 @@ No model weights are included in the executable.
 | scipy | 1.17.1 | BSD-3-Clause | https://scipy.org/ |
 | setuptools | 65.5.0 | MIT | https://github.com/pypa/setuptools |
 | silero-vad | 6.2.1 | MIT | https://github.com/snakers4/silero-vad |
+| ten-vad | 1.0.6.8 | Apache-2.0 | https://github.com/TEN-framework/ten-vad |
 | six | 1.17.0 | MIT | https://github.com/benjaminp/six |
 | soundfile | 0.14.0 | BSD-3-Clause | https://github.com/bastibe/python-soundfile |
 | stable-ts | 2.19.1 | MIT | https://github.com/jianfch/stable-ts |
