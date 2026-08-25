@@ -513,6 +513,45 @@ toolkit 側に `cublas64_12.dll` があればそちらが使われる。
 **詰まっていたのは cuBLAS の解決1点だけ。**
 **RTX 2070 での確認が控えているので、それは 0.9.2 で流してもらうのが望ましい。**
 
+#### 他の DLL の探索も点検した（2026-08-25）
+
+**方法。** 通常実行と、**探索先を潰したまま cuBLAS だけをピン留めした状態**
+（`WHISP_CARRIER_CUDA_FIX=preload` + 偽 `CUDA_PATH`）の2回、
+`Get-Process().Modules` を 80ms 間隔で全件記録して突き合わせた。
+**DLL は FreeLibrary されない限り一覧に残るので、1回でも読まれたものは必ず出る。**
+
+**結果。両方とも 181 モジュール、フルパスまで完全一致。**
+**探索順に依存していたのは cuBLAS だけだった。**
+
+| 分類 | 解決元 | 探索順への依存 |
+|------|--------|---------------|
+| PyAV の `av.libs` 25本・`ten_vad.dll`・`libsndfile`・openblas・VCランタイム・`python311.dll` | すべて `_internal` 配下 | **無い**（静的インポートか絶対パスの ctypes） |
+| `ctranslate2.dll` / `libiomp5md.dll` / `cudnn64_9.dll` | `_internal\ctranslate2\` | **無い**（pyd の隣として解決される） |
+| `cublas64_12.dll` / `cublasLt64_12.dll` | `_internal`（**0.9.2 でピン留め**） | **あった。ここだけが今回の不具合** |
+| `nvcuda.dll` + DriverStore の `nvcuda64.dll` | System32 | ドライバ側。**同梱してはいけないもので、正しい挙動** |
+
+**副産物。cuDNN の実体が1つもロードされていない。**
+載るのは `_internal\ctranslate2\cudnn64_9.dll`（266KB のディスパッチャ）だけで、
+`cudnn_ops` / `cudnn_adv` / `cudnn_engines_precompiled`（514MB）/ `cudnn_graph` /
+`cudnn_cnn` / `cudnn_heuristic` / `cudnn_engines_runtime_compiled` は未使用。
+`cudart64_12.dll` / `nvrtc64_120_0.dll` / `nvJitLink_120_0.dll` も未使用。
+**同梱 CUDA 1870MB のうち、この経路で触られたのは cuBLAS の 752MB だけ。**
+
+> **落とす判断はしない。** 測ったのは **RTX 5090 / float16 / clip 経路の1本だけ**で、
+> **別世代の GPU では nvrtc / nvJitLink の実行時コンパイルや cuDNN エンジンが
+> 必要になりうる**（[既知の未確認 d](README.md)）。**2070 / 4080 の動作報告が揃うまでは触らない。**
+> サイズ削減の候補としてだけ記録する（[K](#k-torch-を外して配布サイズを削る2026-08-23) の続きになる）。
+>
+> **もし cuDNN を呼ぶ経路が実在するなら**（別 compute_type・`--batched` など）、
+> エンジン群は**名前で**ロードされるので**層1が効いている必要がある。
+> 層2は cuBLAS しかピン留めしていない。**
+
+**アプリ外から1つ入っていた。**
+`C:\Program Files (x86)\ASUS\GPUTweakIII\GTIII-OSD\x64\GTIII-OSD64-VK.dll`。
+ASUS のオーバーレイが自分のプロセスに注入されている。害は出ていないが、
+**この種の注入 DLL（RTSS・Afterburner・Discord など）は凍結アプリの
+原因不明のクラッシュの定番**なので、説明のつかない報告が来たら候補に入れる。
+
 **教訓。「同梱した」と「同梱ぶんが使われた」は別のことで、後者は
 ロードされた DLL のフルパスを見るまで確認できていない。**
 `Get-Process` の `.Modules` で見れば1回で分かる。
