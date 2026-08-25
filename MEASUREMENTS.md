@@ -414,12 +414,35 @@ CUDA 13 は `cublas64_13.dll`、CUDA 11 は `cublas64_11.dll`、アンインス�
 [J](#j-同梱-ffmpeg-が使われていなかった2026-08-23)と同じ構図で、
 **0.9.1 の回帰テスト6項目が全部通ったのはそのため。**
 
-**修正（0.9.2）。凍結ビルドでは起動時に自分のプロセスから `CUDA_PATH` /
-`CUDA_HOME` を落とす**（`whisp_carrier._use_bundled_cuda()`）。
-`os.environ.pop` は CRT 側しか書き換えないので、`SetEnvironmentVariableW` も呼んで
-Win32 側も消す。あわせて `os.add_dll_directory(sys._MEIPASS)` を入れた。
-**スクリプト版は対象外**（同梱ぶんが無く、torch が自分のディレクトリを登録する）。
-落としたときは起動時に1行出す（`[CUDA] ignoring CUDA_PATH; using the bundled CUDA libraries`）。
+**修正（0.9.2）は2層。どちらも凍結ビルド限定**（スクリプト版は同梱ぶんが無く、
+torch が自分のディレクトリを登録して解決している）。
+
+| 層 | 実装 | 効くところ |
+|----|------|-----------|
+| **1. 原因を消す** | 起動時に `CUDA_PATH` / `CUDA_HOME` を自プロセスから落とす（`_use_bundled_cuda()`）。`os.environ.pop` は CRT 側しか書き換えないので `SetEnvironmentVariableW` も呼ぶ。あわせて `os.add_dll_directory(sys._MEIPASS)` | CT2 が探索先を差し替えなくなるので、通常の探索順で `_internal` が見つかる |
+| **2. 探索に頼らない** | 同梱の `cublasLt64_12.dll` → `cublas64_12.dll` を**絶対パスで先に読む**（`preload_bundled_cuda()`）。**`device=cuda` のときだけ** | 探索先が何かに潰されても、**名前で要求された時点で既にロード済み**なので 0ms で解決される |
+
+**層2を「PATH に足す」ではなく絶対パスにした理由。** PATH 方式は
+**環境変数を書き換えるので子プロセスにも波及し、同名 DLL が PATH のどこかにあれば
+そちらが勝つ余地が残る。** 絶対パスなら**同梱した実体そのものを名指しできる。**
+
+**順序が要る。** `cublas64_12.dll` は `cublasLt64_12.dll` を import するので、
+Lt を先に読む。そうすれば依存も名前解決で満たされ、探索が走らない。
+
+**`device=cuda` に限定した理由。** 2ファイルのマップに約1秒かかる
+（`cublasLt` 751ms + `cublas` 230ms、実測）。**GPU 経路では追加コストにならない**
+（CT2 が直後に同じファイルをマップするので、払う時期が前倒しになるだけ）が、
+**CPU 経路では丸損。** 実測でも CPU 実行では cublas が1つもロードされない。
+
+**絶対パスの先読みで救えない場合もある**（実測）。**存在しない絶対パスへの
+`LoadLibrary` は、同名モジュールがロード済みでも失敗する。**
+つまり CT2 が `%CUDA_PATH%\bin\cublas64_12.dll` を**絶対パスで**開いていたら層2は効かない。
+**効いたので、CT2 側は名前指定**だと確定した（報告者の PATH 回避策が効いた事実とも一致）。
+
+**層ごとの検証用に環境変数を1つ用意した。** `WHISP_CARRIER_CUDA_FIX`
+（`preload` = 層2のみ、`off` = 両方とも無効 = 0.9.1 相当）。**README には書かない。**
+**これで「配布する exe そのもので不具合を再現できる」**状態になり、
+回帰テストが本当にこの不具合を突いているかを毎回確認できる。
 
 **副作用が1つある。この開発機でも同梱ぶんが読まれるようになった**
 （`cublas64_12.dll` は toolkit 6,14,11,1283 → 同梱 6,14,11,1284）。
@@ -437,20 +460,58 @@ Win32 側も消す。あわせて `os.add_dll_directory(sys._MEIPASS)` を入れ
 | 差分 | — | **時刻行13本のみ。テキストの差分は0** |
 | 所要 | 130.9s | 144.4s |
 
-**0.9.2 の回帰テスト（9項目、すべて exe で実測）。**
+**0.9.2 の回帰テスト（12項目、すべて exe で実測。終了コードとロード元のフルパスまで見た）。**
 
 | 項目 | 結果 |
 |------|------|
-| `--version` | `whisp-carrier 0.9.2 \| ctranslate2 4.8.1 \| torch not bundled \| CUDA: True` |
-| **偽 toolkit（`cublas64_13` だけ）** | **exit 0・同梱 cuBLAS を読む・`[CUDA] ignoring CUDA_PATH`** |
-| **存在しない `CUDA_PATH`** | **exit 0・同梱 cuBLAS** |
-| この開発機のまま（v12.8 あり） | exit 0・**同梱 cuBLAS**（0.9.1 は toolkit を読んでいた） |
-| toolkit も `CUDA_PATH` も無い | exit 0・同梱 cuBLAS・`[CUDA]` 行は出ない |
+| `--version` | exit 0・`whisp-carrier 0.9.2 \| ctranslate2 4.8.1 \| torch not bundled \| CUDA: True` |
+| **偽 toolkit（`bin\cublas64_13.dll` だけ）** | **exit 0・`_internal` の cuBLAS・`[CUDA] ignoring CUDA_PATH`** |
+| **同上・層2のみ**（`WHISP_CARRIER_CUDA_FIX=preload`） | **exit 0・`_internal` の cuBLAS。ピン留めだけで直ることの確認** |
+| **同上・両層とも無効**（`=off`） | **exit 1・報告と同一のエラー。回帰テストが本当に不具合を突いていることの確認** |
+| 両層とも無効・`CUDA_PATH` なし | exit 0（0.9.1 が素の環境では動いていたことの裏返し） |
+| この開発機のまま（v12.8 あり） | exit 0・**`_internal` の cuBLAS**（0.9.1 は toolkit を読んでいた） |
+| `--verbose true` | `[CUDA] pinned bundled cublasLt64_12.dll, cublas64_12.dll` が出る |
+| **`--device cpu`** | exit 0・**cublas が1つもロードされない**（ピン留めを払っていない） |
 | **出力の回帰**（16kHzモノラルWAV・tiny） | **SRT `AE218346…` / VTT `6A6791FD…` が記録値と完全一致** |
 | J の回帰（AAC・PATH に ffmpeg なし） | exit 0・字幕生成・stderr 空 |
-| `--vad_method silero_v5` | 理由と代替を出して失敗（想定どおり） |
+| `--vad_method silero_v5` | exit 1・理由と代替を表示（想定どおり） |
 | `silero_v5_fw` | exit 0 |
 | 生きた設定の保全 | `whisp-carrier.yaml` の MD5 が前後で不変（`399D1164…`） |
+
+#### 報告者の環境と、報告者が見つけた回避策（機構の裏付けになった）
+
+**報告は RTX 4080。**[旧スクリプト版を検証した Amatsukaze の作者](HANDOVER.md#第三者環境での動作報告2026-08-上旬スクリプト版)で、
+**`_internal` を PATH の先頭に足す .bat を exe の隣に置いたら正常動作した**と報告があった。
+
+```bat
+@echo off
+setlocal
+set "PATH=%~dp0_internal;%PATH%"
+"%~dp0whisp-carrier.exe" %*
+exit /b %ERRORLEVEL%
+```
+
+**これで探索順が確定した。** `LoadLibrary` の順は
+**exe のディレクトリ → `SetDllDirectory` の枠（CT2 が `%CUDA_PATH%\bin` に差し替える）
+→ System32 → PATH**。**PATH は最後だが、探索はされる。**
+
+- 枠が生きているとき（`CUDA_PATH` なし）は、**壊れた cublas を PATH の先頭に置いても
+  `_internal` が勝つ**（上の表の4行目と、PATH 汚染の実測）
+- 枠が潰れているとき（`CUDA_PATH` が的外れ）は、**PATH まで落ちてくるので
+  `_internal` を PATH に入れれば救える**（報告者の .bat）
+
+**2つの実測は矛盾していない。** そして **PyInstaller の枠を CT2 が上書きしている**という
+読みは、この2つを同時に説明できる唯一の形。
+
+**0.9.2 の修正との違い。** 報告者の .bat は**枠を潰したまま PATH で救う**ので、
+toolkit 側に `cublas64_12.dll` があればそちらが使われる。
+**0.9.2 は `CUDA_PATH` を捨てるので、常に同梱ぶんが使われる**（決定的になる）。
+どちらも症状は消えるが、**再現性が要るのは後者。**
+
+**副産物として、4080 で exe の残り全部が動いていることが分かった** —
+モデル取得・TEN VAD・推論・Amatsukaze 連携・字幕出力。
+**詰まっていたのは cuBLAS の解決1点だけ。**
+**RTX 2070 での確認が控えているので、それは 0.9.2 で流してもらうのが望ましい。**
 
 **教訓。「同梱した」と「同梱ぶんが使われた」は別のことで、後者は
 ロードされた DLL のフルパスを見るまで確認できていない。**

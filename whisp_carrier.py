@@ -36,6 +36,20 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 # the startup banner so a support log says which machine this happened on.
 CUDA_ENV_DROPPED: List[str] = []
 
+# The CUDA libraries CTranslate2 resolves by name at first use, in dependency
+# order (cublas imports cublasLt). Pinned by absolute path rather than found by
+# search: see preload_bundled_cuda().
+BUNDLED_CUDA_PRELOAD = ("cublasLt64_12.dll", "cublas64_12.dll")
+
+# Test hook for the two layers below. Not documented for users -- it exists so
+# that each layer can be shown to work on its own, and so that the failure this
+# release fixes can still be reproduced with the shipped exe.
+#
+#   unset       both layers (normal)
+#   'preload'   pinning only, CUDA_PATH left in place
+#   'off'       neither, i.e. the 0.9.1 behaviour
+_CUDA_FIX = os.environ.get("WHISP_CARRIER_CUDA_FIX", "").strip().lower()
+
 
 def _use_bundled_cuda() -> None:
     r"""Keep CTranslate2 on the CUDA libraries this build ships.
@@ -62,6 +76,8 @@ def _use_bundled_cuda() -> None:
     """
     if os.name != "nt" or not getattr(sys, "frozen", False):
         return
+    if _CUDA_FIX in ("off", "preload"):
+        return
 
     for var in ("CUDA_PATH", "CUDA_HOME"):
         if os.environ.pop(var, None) is None:
@@ -87,6 +103,54 @@ def _use_bundled_cuda() -> None:
 
 
 _use_bundled_cuda()
+
+
+def preload_bundled_cuda() -> List[str]:
+    r"""Pin the bundled cuBLAS by absolute path, before CTranslate2 looks for it.
+
+    Second layer under _use_bundled_cuda(), and the one that does not depend on
+    the DLL search path being intact. CTranslate2 asks for `cublas64_12.dll` by
+    name; a module with that base name already in the process satisfies the
+    request immediately (measured: 0.0 ms), whichever directories are being
+    searched by then. Loading them here by full path is therefore the difference
+    between "we ship it" and "it is the one that runs".
+
+    Order matters: cublas imports cublasLt, so cublasLt goes first and the
+    dependency is met by name rather than by another search.
+
+    Called only for device=cuda. Mapping the two files costs about a second, and
+    on the GPU path that is not an extra second -- CTranslate2 maps the same
+    files a moment later anyway. On CPU it would be pure waste.
+
+    Absolute paths do not survive this trick: LoadLibrary with a full path to a
+    file that does not exist fails even when a module of the same base name is
+    loaded (measured). So this covers a name-based lookup, which is what
+    CTranslate2 does -- confirmed in the field, where putting _internal on PATH
+    was enough to make 0.9.1 work.
+    """
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return []
+    if _CUDA_FIX == "off":
+        return []
+
+    base = getattr(sys, "_MEIPASS", None)
+    if not base:
+        return []
+
+    loaded: List[str] = []
+    for name in BUNDLED_CUDA_PRELOAD:
+        path = Path(base) / name
+        if not path.is_file():
+            continue
+        try:
+            ctypes.WinDLL(str(path))
+        except OSError:
+            # Not fatal: the normal search may still find it, and a GPU failure
+            # downstream reports itself with more context than we could here.
+            continue
+        loaded.append(name)
+    return loaded
+
 
 from faster_whisper import WhisperModel  # noqa: E402  (must follow the env var)
 from tqdm import tqdm
@@ -1183,6 +1247,14 @@ def main() -> None:
     # file so that anything the caller set explicitly still wins.
     for line in whisp_models.apply_model_defaults(args, resolved.spec, explicit):
         print(line, flush=True)
+
+    # Pin the bundled CUDA libraries before CTranslate2 goes looking for them.
+    # Must happen before the model is constructed, which is where the first
+    # cuBLAS call happens.
+    if device == "cuda":
+        _pinned = preload_bundled_cuda()
+        if _pinned and args.verbose:
+            print(f"[CUDA] pinned bundled {', '.join(_pinned)}", flush=True)
 
     # Load model
     print(f"\nLoading model: {resolved.path}...", flush=True)

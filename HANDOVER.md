@@ -335,8 +335,13 @@ whisp-carrier\_internal\...                  3021 ファイル
   記録されている全数値が再現できなくなる。** 区間は `eval/ext_vad_dump.py` が
   JSON に書き、`--vad_method precomputed` が読む（[測定結果 #18](MEASUREMENTS.md#18-ten-vad-が-silero-を置き換えた取りこぼしは実装で直せる)）。
   `.gitignore` に `_venv*/` が無ければ足すこと
-- **凍結ビルドは起動時に `CUDA_PATH` / `CUDA_HOME` を自分のプロセスから捨てる。
-  この行を消すと、CUDA Toolkit が入っていない環境で exe が落ちる。**
+- **凍結ビルドは（1）起動時に `CUDA_PATH` / `CUDA_HOME` を自分のプロセスから捨て、
+  （2）`device=cuda` のとき同梱 cuBLAS を絶対パスで先に読む。この2つを消すと、
+  CUDA Toolkit の世代が違う環境で exe が落ちる。**
+  層ごとの検証には `WHISP_CARRIER_CUDA_FIX`（`preload` = 層2のみ / `off` = 両方無効）。
+  **README には書かない開発用の穴で、「配布する exe そのままで不具合を再現する」ために置いてある。**
+  先読みは `cublasLt` → `cublas` の順（依存の向き）。**PATH に足す方式は採らなかった** —
+  子プロセスに波及し、PATH のどこかにある同名 DLL が勝つ余地が残るため。
   CTranslate2 は cuBLAS を遅延ロードし、**`CUDA_PATH` が設定されているとそこの
   `bin` を見て、同梱ぶん（`_internal`）を検索対象から外す。** CUDA 13/11 や
   アンインストール後の残骸を指していると `cublas64_12.dll` が見つからず、
