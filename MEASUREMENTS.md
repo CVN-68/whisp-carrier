@@ -379,6 +379,85 @@ PyInstaller が追加した CUDA ライブラリの依存関係を辿って `tor
 **二重に同梱した**（766 MB の無駄）。`a.binaries` から `torch/` 宛のエントリを
 落として解決している。
 
+### N. CUDA_PATH が同梱の cuBLAS を隠していた（2026-08-24 報告・0.9.2 で修正）
+
+**第三者環境からの最初の報告で、最初の報告が不具合だった。** 0.9.1 exe を
+Amatsukaze から呼んで落ちている。
+
+```
+2026-08-24 22:01:39 [ERROR] F:\temp\Amatsukaze\amt9191378\a0-0-0-0-main.aac:
+  Library cublas64_12.dll is not found or cannot be loaded
+```
+
+**原因。`CUDA_PATH` が設定されていると、CTranslate2 は cuBLAS を
+`%CUDA_PATH%\bin` から読もうとし、同梱ぶん（`_internal`）が検索対象から外れる。**
+`ctranslate2.dll` の文字列に `CUDA_PATH` と `SetDllDirectory` の両方がある。
+CUDA 13 は `cublas64_13.dll`、CUDA 11 は `cublas64_11.dll`、アンインストール後は
+そもそもディレクトリが無い。**どれも `cublas64_12.dll` を持たないので、
+同梱しているのに「無い」と言われて停止する。**
+
+**0.9.1 exe で再現させた。** `CUDA_PATH` を弄るだけで、モデル・入力・PATH を
+同一にしたまま結果が変わる。**PATH は関係ない**（壊れた cublas を PATH の先頭に
+置いても影響しなかった。CT2 の経路は PATH を見ていない）。
+
+| `CUDA_PATH` | PATH の toolkit | 0.9.1 の結果 | 実際に読まれた cuBLAS |
+|-------------|----------------|-------------|---------------------|
+| v12.8（この開発機） | あり | exit 0 | **toolkit の `v12.8\bin`**（同梱ぶんではない） |
+| v12.8 | なし | exit 0 | toolkit の `v12.8\bin` |
+| 未設定 | なし | exit 0 | `_internal`（同梱ぶん） |
+| 未設定 | あり | exit 0 | `_internal`（同梱ぶん） |
+| **`bin\cublas64_13.dll` だけの偽 toolkit** | なし | **報告と同一のエラーで exit 1** | — |
+| **存在しないパス** | なし | **同上** | — |
+
+**この開発機では出ない。CUDA Toolkit 12.8 が入っていて `CUDA_PATH` がそれを指すので、
+同梱ぶんが一度も使われないまま toolkit の cuBLAS で動いていた。**
+[J](#j-同梱-ffmpeg-が使われていなかった2026-08-23)と同じ構図で、
+**0.9.1 の回帰テスト6項目が全部通ったのはそのため。**
+
+**修正（0.9.2）。凍結ビルドでは起動時に自分のプロセスから `CUDA_PATH` /
+`CUDA_HOME` を落とす**（`whisp_carrier._use_bundled_cuda()`）。
+`os.environ.pop` は CRT 側しか書き換えないので、`SetEnvironmentVariableW` も呼んで
+Win32 側も消す。あわせて `os.add_dll_directory(sys._MEIPASS)` を入れた。
+**スクリプト版は対象外**（同梱ぶんが無く、torch が自分のディレクトリを登録する）。
+落としたときは起動時に1行出す（`[CUDA] ignoring CUDA_PATH; using the bundled CUDA libraries`）。
+
+**副作用が1つある。この開発機でも同梱ぶんが読まれるようになった**
+（`cublas64_12.dll` は toolkit 6,14,11,1283 → 同梱 6,14,11,1284）。
+**公女殿下 #10 で A/B を取った結果、テキストは完全に同一**、
+差は**401キューのうち13キューの時刻だけ**（+10ms〜920ms、2箇所に集中）。
+**全文CERはテキストだけの指標なので不変。** 時刻を使う指標
+（per-block CER・coverage）には微差が出る可能性があるが、再採点はしていない。
+
+| | A（同梱 = 0.9.2 の既定） | B（toolkit = 0.9.1 の実質） |
+|---|---|---|
+| セグメント数 | 400 | 400 |
+| キュー数 | 401 | 401 |
+| SRT サイズ | 31,261 バイト | 31,261 バイト |
+| SRT MD5 | `BD6603BA…` | `B27376DB…` |
+| 差分 | — | **時刻行13本のみ。テキストの差分は0** |
+| 所要 | 130.9s | 144.4s |
+
+**0.9.2 の回帰テスト（9項目、すべて exe で実測）。**
+
+| 項目 | 結果 |
+|------|------|
+| `--version` | `whisp-carrier 0.9.2 \| ctranslate2 4.8.1 \| torch not bundled \| CUDA: True` |
+| **偽 toolkit（`cublas64_13` だけ）** | **exit 0・同梱 cuBLAS を読む・`[CUDA] ignoring CUDA_PATH`** |
+| **存在しない `CUDA_PATH`** | **exit 0・同梱 cuBLAS** |
+| この開発機のまま（v12.8 あり） | exit 0・**同梱 cuBLAS**（0.9.1 は toolkit を読んでいた） |
+| toolkit も `CUDA_PATH` も無い | exit 0・同梱 cuBLAS・`[CUDA]` 行は出ない |
+| **出力の回帰**（16kHzモノラルWAV・tiny） | **SRT `AE218346…` / VTT `6A6791FD…` が記録値と完全一致** |
+| J の回帰（AAC・PATH に ffmpeg なし） | exit 0・字幕生成・stderr 空 |
+| `--vad_method silero_v5` | 理由と代替を出して失敗（想定どおり） |
+| `silero_v5_fw` | exit 0 |
+| 生きた設定の保全 | `whisp-carrier.yaml` の MD5 が前後で不変（`399D1164…`） |
+
+**教訓。「同梱した」と「同梱ぶんが使われた」は別のことで、後者は
+ロードされた DLL のフルパスを見るまで確認できていない。**
+`Get-Process` の `.Modules` で見れば1回で分かる。
+[L（回帰テストの穴）](STATUS.md#l-回帰テストの穴を塞ぐ)に
+「`CUDA_PATH` を cublas 不在のディレクトリに向けて実行」を追加した。
+
 ## 完了した着手の記録（F・G・I・H・E・A・C・B と運用メモ）
 
 **以下は決着済み。読む必要があるのは、同じことを再検討するときだけ。**

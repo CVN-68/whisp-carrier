@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import codecs
 import contextlib
+import ctypes
 import json
 import os
 import sys
@@ -30,6 +31,62 @@ from typing import List, Optional
 # Set before faster_whisper pulls huggingface_hub in, and with setdefault so
 # that anyone who deliberately asked for the warning still gets it.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+# Names of the CUDA_* variables dropped by _use_bundled_cuda(), reported with
+# the startup banner so a support log says which machine this happened on.
+CUDA_ENV_DROPPED: List[str] = []
+
+
+def _use_bundled_cuda() -> None:
+    r"""Keep CTranslate2 on the CUDA libraries this build ships.
+
+    ctranslate2.dll resolves cuBLAS on first use rather than at load time, and
+    when CUDA_PATH is set it looks under %CUDA_PATH%\bin. On a machine whose
+    toolkit is 12.x that silently works -- and runs the machine's cuBLAS, not
+    the one we shipped and measured. On any other machine it is fatal:
+
+        [ERROR] <file>: Library cublas64_12.dll is not found or cannot be loaded
+
+    CUDA 13 has cublas64_13.dll, CUDA 11 has cublas64_11.dll, and an
+    uninstalled toolkit can leave CUDA_PATH behind pointing at nothing useful.
+    None of them carry cublas64_12.dll, so the run dies even though _internal/
+    holds it. Reported from the field 2026-08-24 and reproduced here.
+
+    Dropping the variable from our own process restores the normal search
+    order, which finds _internal. Nothing is lost: the exe ships every CUDA
+    library CTranslate2 loads, borrowing the machine's copies was never
+    intended, and child processes (ffmpeg) do not read this.
+
+    Frozen builds only. From source there is no bundled copy to prefer, and
+    torch registers its own directory on import.
+    """
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+
+    for var in ("CUDA_PATH", "CUDA_HOME"):
+        if os.environ.pop(var, None) is None:
+            continue
+        CUDA_ENV_DROPPED.append(var)
+        # os.environ.pop updates the CRT copy of the environment.
+        # ctranslate2.dll reads the Win32 block, so clear that too instead of
+        # trusting the two to stay in sync.
+        try:
+            ctypes.windll.kernel32.SetEnvironmentVariableW(var, None)
+        except Exception:
+            pass
+
+    # Belt and braces: register _internal as a DLL directory in its own right,
+    # so a SetDllDirectory call by any dependency cannot hide it. The
+    # bootloader already makes it findable; this survives it being replaced.
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        try:
+            os.add_dll_directory(base)
+        except OSError:
+            pass
+
+
+_use_bundled_cuda()
 
 from faster_whisper import WhisperModel  # noqa: E402  (must follow the env var)
 from tqdm import tqdm
@@ -131,7 +188,7 @@ MEDIA_EXTENSIONS = {
     ".ts", ".m2ts", ".mts",
 }
 
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 
 # ─────────────────────────────────────────────
 # Per-backend VAD threshold
@@ -1068,6 +1125,11 @@ def main() -> None:
     print(f"{runtime_banner()} | device={device} | compute={compute_type}", flush=True)
     if CUDA_AVAILABLE:
         print(f"GPU: {CUDA_DEVICE_NAME}", flush=True)
+    if CUDA_ENV_DROPPED:
+        # Only prints on machines with a CUDA toolkit installed, and says why
+        # the bundled libraries are used instead of it.
+        print(f"[CUDA] ignoring {' / '.join(CUDA_ENV_DROPPED)}; "
+              f"using the bundled CUDA libraries", flush=True)
 
     # Replacing the built-in VAD model has to happen before anything runs it,
     # because faster-whisper caches the instance on first use.

@@ -55,6 +55,16 @@ Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソ�
 >
 > `whisp-carrier.exe --checkcuda` でも確認できます（`1` 以上なら GPU が見えています。`0` なら見えていません）。
 
+> **CUDA Toolkit が入っている環境でも、同梱の CUDA ライブラリを使います**（0.9.2 から）。
+> 起動時に `[CUDA] ignoring CUDA_PATH; using the bundled CUDA libraries` と出るのは
+> それを知らせる行で、異常ではありません。
+>
+> **0.9.1 以前は逆で、環境変数 `CUDA_PATH` が指す CUDA Toolkit を優先していました。**
+> そのため `%CUDA_PATH%\bin` に `cublas64_12.dll` が無い環境
+> （CUDA 13 や CUDA 11 が入っている、アンインストール後の設定が残っている等）で
+> `Library cublas64_12.dll is not found or cannot be loaded` で停止しました。
+> **0.9.1 を使っていてこのエラーが出た場合は 0.9.2 に更新してください。**
+
 アーカイブを展開して、`whisp-carrier.exe` を好きな場所に置くだけです。
 Amatsukaze から呼ぶ場合は[Amatsukaze との連携](#amatsukaze-との連携)へ。
 

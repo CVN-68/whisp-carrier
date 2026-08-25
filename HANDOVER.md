@@ -65,6 +65,11 @@ whisp-carrier の設計判断・既知の問題・検証環境をまとめたド
 | RTX 4080 + Amatsukaze 改造版（**bat 指定＝スクリプト版**） | 「精度含め問題なく動作」。Amatsukaze 側の拡張は不要との評価 | 2026-08-02 |
 | RTX 2070 | 「問題なく動作」 | 2026-08-06 |
 
+**現行 exe（0.9.1）についての第三者からの最初の報告は、不具合だった**（2026-08-24）。
+`CUDA_PATH` が同梱 cuBLAS を隠していて起動後に停止する
+（[記録](MEASUREMENTS.md#n-cuda_path-が同梱の-cublas-を隠していた2026-08-24-報告092-で修正)）。
+0.9.2 で直したが、**「他人の環境で1回動く」はまだ満たしていない。**
+
 **ただし検証されたのは 8月初旬のスクリプト版で、現在の配布物とは別物。**
 その後に TEN VAD の既定化・ループ抑制・採点指標の修正・exe 配布が入っている。
 **現行 exe（0.9.0）を第三者環境で通した記録は無い。**
@@ -330,6 +335,19 @@ whisp-carrier\_internal\...                  3021 ファイル
   記録されている全数値が再現できなくなる。** 区間は `eval/ext_vad_dump.py` が
   JSON に書き、`--vad_method precomputed` が読む（[測定結果 #18](MEASUREMENTS.md#18-ten-vad-が-silero-を置き換えた取りこぼしは実装で直せる)）。
   `.gitignore` に `_venv*/` が無ければ足すこと
+- **凍結ビルドは起動時に `CUDA_PATH` / `CUDA_HOME` を自分のプロセスから捨てる。
+  この行を消すと、CUDA Toolkit が入っていない環境で exe が落ちる。**
+  CTranslate2 は cuBLAS を遅延ロードし、**`CUDA_PATH` が設定されているとそこの
+  `bin` を見て、同梱ぶん（`_internal`）を検索対象から外す。** CUDA 13/11 や
+  アンインストール後の残骸を指していると `cublas64_12.dll` が見つからず、
+  `Library cublas64_12.dll is not found or cannot be loaded` で停止する
+  （[記録](MEASUREMENTS.md#n-cuda_path-が同梱の-cublas-を隠していた2026-08-24-報告092-で修正)）。
+  実装は `whisp_carrier._use_bundled_cuda()` で**凍結ビルド限定**。
+  スクリプト版に効かせてはいけない（同梱ぶんが無く、torch が自分の
+  `torch/lib` を登録して解決している）。
+  **この開発機には CUDA Toolkit 12.8 が入っているので、この修正が入るまで
+  同梱ぶんは一度も使われていなかった。** 「同梱した」と「同梱ぶんが読まれた」は
+  別のことで、後者は `Get-Process` の `.Modules` でフルパスを見るまで確認できない。
 - **`sample/`（録画物）と `_eval/` はコミットしないこと。** `.gitignore` 済み。
   `build/` `dist/` `build-full/` `dist-full/` `_models/` `_tmp*/` も同様。
   `_tools/` は三段構成で `_tools/ffmpeg/PROVENANCE.txt` だけを追跡している。
