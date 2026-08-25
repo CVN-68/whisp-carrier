@@ -14,8 +14,10 @@ block_cipher = None
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 # ---------------------------------------------------------------------------
-# WHISP_CARRIER_SLIM=1 -- drop torch and ship only the CUDA libraries
-# CTranslate2 actually loads.
+# The default (slim) build: drop torch and ship only the CUDA libraries
+# CTranslate2 actually loads. There is no variable to switch this on -- it is
+# what a plain `pyinstaller whisp_carrier.spec` produces. WHISP_CARRIER_SLIM,
+# which used to select it, no longer exists.
 #
 # Measured on the 0.9.0 build: _internal was 4.7 GB and torch was 4273 MB of it,
 # of which 4004 MB is bundled CUDA. Nothing on the default path uses torch --
@@ -31,12 +33,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 # (torch_cuda 981 MB, torch_cpu 244 MB, cusparse 362 MB, cufft 263 MB,
 # cusolver 215+150 MB, curand 69 MB, the duplicate nvrtc .alt 83 MB).
 #
-# Opt-in rather than default because the released 0.9.0 archive was built
-# without it, and a packaging change of this size should not ride along
-# invisibly with a bug fix.
-# Adopted as the default on 2026-08-23, so the distributed build is the one this
-# spec produces with no environment set. It used to be opt-in, which was the
-# wrong way round: forgetting the variable silently produced a 4.8 GB archive.
+# Adopted as the default on 2026-08-23. It shipped as opt-in first, on the
+# reasoning that a packaging change of this size should not ride along invisibly
+# with a bug fix -- which was the wrong way round: forgetting the variable
+# silently produced a 4.8 GB archive.
 #
 # WHISP_CARRIER_FULL=1 keeps torch, because stable-ts (--realign) needs it.
 # WHISP_CARRIER_WITH_TORCH=1 keeps torch without pulling stable-ts in, which is
@@ -419,7 +419,7 @@ if SLIM:
         _torch_lib = Path(_torch_probe.__file__).parent / 'lib'
     except Exception as exc:
         raise SystemExit(
-            f'[spec] WHISP_CARRIER_SLIM=1 needs to read the CUDA libraries out '
+            f'[spec] the slim build needs to read the CUDA libraries out '
             f'of the installed torch, but importing torch failed: {exc}\n'
             'Either install torch in the build environment, or install the '
             'nvidia-cublas-cu12 and nvidia-cudnn-cu12 wheels and point '
