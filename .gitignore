@@ -65,3 +65,6 @@ _tools/*
 !_tools/ffmpeg/
 _tools/ffmpeg/*
 !_tools/ffmpeg/PROVENANCE.txt
+!_tools/rnnoise/
+_tools/rnnoise/*
+!_tools/rnnoise/PROVENANCE.txt

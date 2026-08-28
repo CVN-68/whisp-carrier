@@ -1,0 +1,62 @@
+RNNoise model for ffmpeg's arnndn filter (--ff_rnndn_sh)
+========================================================
+
+NOT BUNDLED. Fetched only to answer "would it help?" -- it does not. Kept here
+so the measurement can be repeated without hunting for the file again.
+
+File      sh.rnnn  ("somnolent hogwash", 2018-09-01)
+Size      297,646 bytes
+SHA-256   70BB6685EB0C2A1D18E2918DCA3FBFBD39317010B1802EB1B6EA73A92F3FDEC0
+Source    https://raw.githubusercontent.com/GregorR/rnnoise-models/master/somnolent-hogwash-2018-09-01/sh.rnnn
+Fetched   2026-08-25
+Licence   The upstream repository states that, apart from its tools/ directory
+          and its README, none of the work is creative and therefore none of it
+          is subject to copyright. See https://github.com/GregorR/rnnoise-models
+          (wording paraphrased here; read the upstream README before relying on
+          it for redistribution).
+
+Why it is not bundled
+---------------------
+Measured on two references (死亡遊戯 #09, 公女殿下 #10), TEN VAD 0.75, large-v3,
+songs excluded. Full-text CER, lower is better:
+
+  no filter                              15.4%   coverage 87.1%
+  --ff_lowhighpass                       15.3%   coverage 87.4%
+  --ff_rnndn_sh, chain as it ships       28.8%   coverage 72.9%   (+13.4)
+  --ff_rnndn_sh, 48 kHz source first     24.2%   coverage 78.4%   (+8.8)
+
+Precision stays around 90% while coverage collapses: the filter removes speech
+along with the music and effects it was asked to remove. RNNoise is trained for
+telephony and room noise, which anime audio is not.
+
+arnndn accepts 48 kHz only, and this pipeline downmixes to 16 kHz mono before
+filtering (that ordering is the fix recorded as 既知の問題 2-a), so ffmpeg
+upsamples for the filter. Feeding it the untouched 48 kHz track instead recovers
+4.6 points of the 13.4 -- real, but still far behind no filter at all, so
+reordering the chain for this filter is not worth doing either.
+
+Details: MEASUREMENTS.md, 測定結果 #23.
+
+To repeat the measurement
+-------------------------
+audio_filter.apply_rnndn_sh() passes the bare name `sh.rnnn`, so ffmpeg resolves
+it against the working directory. Copy this file to the repository root, run the
+eval, then delete the copy:
+
+  Copy-Item _tools\rnnoise\sh.rnnn .\sh.rnnn
+  python eval/run.py --config ten-clip --tag ff-rnndn-sh --extra=--ff_rnndn_sh
+  Remove-Item .\sh.rnnn
+
+The 48 kHz-first variant has to be built by hand, because the chain cannot be
+reordered from the CLI:
+
+  ffmpeg -i <source.mkv> -map 0:a:0 -af arnndn=m=sh.rnnn \
+         -ar 16000 -ac 1 -c:a pcm_s16le _eval/wav-rnndn/<same name as _eval/wav>.wav
+  python eval/run.py --config ten-clip --tag ff-rnndn-pre --wav-dir _eval/wav-rnndn
+
+Do this from Python or cmd, not PowerShell: PowerShell mangles non-ASCII argv for
+native tools, and every reference file name here is Japanese (ffmpeg reports
+"Illegal byte sequence").
+
+xiph.rnnn (--ff_rnndn_xiph) was never fetched. Given the result above there is no
+reason to.
