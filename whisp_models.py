@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -301,6 +302,186 @@ def resolve(
 
     convert(source, out_dir, quantization=quantization, lines=lines)
     return ResolvedModel(requested, str(out_dir), spec, True, lines)
+
+
+# ─────────────────────────────────────────────
+# Alignment heads on models we did not convert
+# ─────────────────────────────────────────────
+#
+# _fix_alignment_heads() repairs the list while converting, because there the
+# transformers config is at hand and gives both decoder_layers and
+# decoder_attention_heads. A model published as CTranslate2 arrives with neither:
+# kotoba-whisper-v2.0-faster's config.json holds only alignment_heads, lang_ids
+# and the suppress lists, and ctranslate2.models.Whisper exposes nothing about
+# the decoder shape either (checked: n_mels, num_languages, is_multilingual and
+# thread counts, nothing structural).
+#
+# So a pre-converted distilled model walks straight into 罠2. Measured on
+# kotoba-v2: alignment_heads name decoder layers 7-25, the decoder has 2, and the
+# process dies at align() with exit 0xC0000005 and no Python traceback at all.
+# HANDOVER predicted this for third-party CT2 uploads and marked it 未検証; it
+# turns out to hit an official kotoba-tech release.
+#
+# The layer count is recoverable from the weight names inside model.bin, which is
+# enough to *detect* the problem. It is not enough to *repair* it: when every
+# head is out of range the replacement needs a head count per layer, and that
+# would mean parsing CT2's binary tensor shapes. So detection disables word
+# timestamps and says why, rather than guessing which heads are right.
+#
+# Text is unaffected, so accuracy measured as whole-region CER does not move.
+# What is lost is word-level timing, i.e. sanitize_segments() clamps over-long
+# cues instead of splitting them, and formatting falls back to pseudo-words.
+
+_DECODER_LAYER_RE = re.compile(rb"decoder/layer_(\d+)/")
+
+# Names sit throughout model.bin, so it is read in pieces rather than loaded
+# whole; these files run to several GB.
+_SCAN_CHUNK = 32 << 20
+_SCAN_OVERLAP = 64
+
+
+# The scan reads the whole file, so on large-v3 it costs about 4 seconds. That
+# would be paid on every start of the default model for a check that almost
+# always says "fine", so the answer is remembered per model file. Keyed on size
+# and mtime so a replaced or re-downloaded model is scanned again.
+LAYER_CACHE_NAME = "whisp-carrier-ct2-layers.json"
+
+
+def _layer_cache_path(cache_root: Optional[Path]) -> Optional[Path]:
+    if cache_root is None:
+        return None
+    return Path(cache_root) / LAYER_CACHE_NAME
+
+
+def decoder_layers_of(
+    model_dir: Path,
+    cache_root: Optional[Path] = None,
+) -> Optional[int]:
+    """Decoder layer count, read from the CTranslate2 weight names."""
+    binary = Path(model_dir) / "model.bin"
+    if not binary.is_file():
+        return None
+
+    try:
+        stat = binary.stat()
+        key = f"{binary.resolve()}|{stat.st_size}|{int(stat.st_mtime)}"
+    except OSError:
+        return None
+
+    cache_path = _layer_cache_path(cache_root)
+    cache: Dict[str, Any] = {}
+    if cache_path is not None and cache_path.is_file():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+        if key in cache:
+            value = cache[key]
+            return int(value) if isinstance(value, int) else None
+
+    highest = -1
+    try:
+        with binary.open("rb") as handle:
+            tail = b""
+            while True:
+                chunk = handle.read(_SCAN_CHUNK)
+                if not chunk:
+                    break
+                for match in _DECODER_LAYER_RE.finditer(tail + chunk):
+                    highest = max(highest, int(match.group(1)))
+                tail = chunk[-_SCAN_OVERLAP:]
+    except OSError:
+        return None
+    layers = highest + 1 if highest >= 0 else None
+
+    if cache_path is not None and layers is not None:
+        cache[key] = layers
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
+        except OSError:
+            pass
+    return layers
+
+
+def alignment_head_problem(
+    model_dir: Path,
+    cache_root: Optional[Path] = None,
+) -> Optional[str]:
+    """Why word timestamps would crash on this CT2 model, or None.
+
+    Cheap on the common path: a model whose config declares no alignment_heads
+    returns immediately without touching model.bin.
+    """
+    model_dir = Path(model_dir)
+    config_path = model_dir / "config.json"
+    if not config_path.is_file():
+        return None
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    heads = config.get("alignment_heads")
+    if not heads:
+        return None
+    try:
+        referenced = max(int(pair[0]) for pair in heads)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    layers = decoder_layers_of(model_dir, cache_root)
+    if layers is None or referenced < layers:
+        return None
+    return (
+        f"alignment heads name decoder layer {referenced} but this model has "
+        f"{layers}"
+    )
+
+
+def local_ct2_dir(source: str, cache_root: Optional[Path] = None) -> Optional[Path]:
+    """Where a resolved model actually sits on disk, without downloading it.
+
+    A directory is itself. A repo id is looked up through faster-whisper's own
+    download_model, which is a cache hit once WhisperModel has been built, so
+    this costs nothing and cannot disagree with the path the model was loaded
+    from.
+    """
+    candidate = Path(source).expanduser()
+    if candidate.is_dir():
+        return candidate
+    try:
+        from faster_whisper.utils import download_model
+
+        return Path(download_model(
+            source,
+            local_files_only=True,
+            cache_dir=str(cache_root) if cache_root else None,
+        ))
+    except Exception:
+        return None
+
+
+def word_timestamp_guard(
+    source: str,
+    cache_root: Optional[Path] = None,
+) -> Optional[List[str]]:
+    """Lines to print, and a signal to switch word timestamps off, or None."""
+    model_dir = local_ct2_dir(source, cache_root)
+    if model_dir is None:
+        return None
+    problem = alignment_head_problem(model_dir, cache_root)
+    if problem is None:
+        return None
+    return [
+        f"[MODEL] word timestamps disabled: {problem}.",
+        "[MODEL]   CTranslate2 indexes that list during alignment and the "
+        "process would exit without a Python error (0xC0000005).",
+        "[MODEL]   Usually a distilled model carrying its teacher's head list. "
+        "Cues keep their text and segment times; word-level times are lost.",
+    ]
 
 
 def _repo_form(repo: str, lines: List[str]) -> str:

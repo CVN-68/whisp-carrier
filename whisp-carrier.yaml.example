@@ -171,8 +171,8 @@ best_of: 5
 # ff_invert: false
 # ff_tempo: 1.0
 # ff_silence_suppress: [0, 3.0]   # [閾値dB, 最小長秒]
-# ff_vocal_extract: null     # mdx_kim2 / mb-roformer
-# mdx_chunk: 15
+# ff_vocal_extract: null     # mdx_kim2 / mb-roformer。測定では精度が下がる
+# mdx_chunk: 0               # MDXのセグメント長（STFTフレーム数）。0=モデル既定
 # voc_device: cuda
 
 # --- その他 -------------------------------------------------

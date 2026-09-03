@@ -215,6 +215,32 @@ def extract_audio(input_path: str, output_path: str, track: int = 1,
     _run(cmd)
 
 
+def extract_track_native(input_path: str, output_path: str,
+                         track: int = 1) -> None:
+    """Extract one audio track to WAV without touching its rate or layout.
+
+    Only the vocal separation stage needs this. The separation models are
+    trained on 44.1kHz stereo music, so handing them the 16kHz mono audio
+    extract_audio produces throws away every band above 8kHz and the stereo
+    image the separation depends on, before the model has seen any of it. That
+    is the same class of mistake as running channel selection after the
+    downmix (see extract_audio), except that it degrades the result quietly
+    instead of producing silence, so no stage check catches it.
+
+    Everything else in the chain is an ffmpeg filter that works fine at 16kHz
+    mono, and 16kHz mono is what the recogniser wants, so the conversion still
+    happens -- just after the separation rather than before it.
+    """
+    _run([
+        FFMPEG, "-y",
+        "-i", input_path,
+        "-map", f"0:a:{track - 1}",
+        "-c:a", "pcm_s16le",
+        "-f", "wav",
+        output_path,
+    ])
+
+
 def apply_rnndn_sh(input_path: str, output_path: str) -> None:
     """Suppress non-speech using RNNoise SH model (GregorR)."""
     _run([
@@ -332,12 +358,80 @@ def apply_silence_suppress(input_path: str, output_path: str,
 # layout's channel names. See _CHANNEL_FILTERS.
 
 
+# audio-separator names its output "<input>_(<Stem>)_<model>.<ext>", so the
+# stem label is the parenthesised part. Matching against the whole file name
+# instead picks the wrong file whenever the model name itself contains the word
+# (see _pick_vocal_stem).
+_RE_STEM_LABEL = re.compile(r"\(([^)]+)\)")
+
+
+def _pick_vocal_stem(stems: list, tmpdir: str, model: str) -> str:
+    """Return the vocals stem, or refuse to guess.
+
+    The test used to be `"vocal" in os.path.basename(path)`, applied to the
+    whole file name. Both models write a name that contains the model's own
+    name, and both model names contain "vocal":
+
+        tmp_(other)_vocals_mel_band_roformer.wav     <- accompaniment
+        tmp_(vocals)_vocals_mel_band_roformer.wav    <- what was wanted
+        tmp_(Instrumental)_Kim_Vocal_2.wav           <- accompaniment
+        tmp_(Vocals)_Kim_Vocal_2.wav                 <- what was wanted
+
+    The accompaniment sorts first, so every run so far transcribed the audio
+    with the voices taken out. On a 30 minute recording that left 27.1s of
+    speech for the VAD to find out of 1800s, and language detection came back
+    "en" on Japanese dialogue. This is where "vocal extraction removes even the
+    anime voices" came from: the model was doing its job and the wrong output
+    was being read.
+
+    There is no fallback to stems[0] on purpose. Guessing is what produced a
+    silently wrong result for as long as this option has existed; a failure that
+    names the stems is more useful.
+
+    audio-separator also logs model failures inside separate() and returns an
+    empty list rather than raising, and it returns bare file names in some
+    versions and absolute paths in others.
+    """
+    if not stems:
+        raise FilterStageError(
+            f"vocal separation with {model} produced no output. "
+            f"audio-separator reports the reason on the lines above; nothing "
+            f"would be left to transcribe, so the run stops here."
+        )
+
+    def stem_label(path: str) -> str:
+        found = _RE_STEM_LABEL.search(os.path.basename(path))
+        return found.group(1).lower() if found else ""
+
+    vocal_file = next(
+        (s for s in stems if "vocal" in stem_label(s)),
+        None,
+    )
+    if vocal_file is None:
+        names = ", ".join(os.path.basename(s) for s in stems)
+        raise FilterStageError(
+            f"vocal separation with {model} produced no stem labelled as "
+            f"vocals (got: {names}). Transcribing the accompaniment instead "
+            f"would look like a working run, so the run stops here."
+        )
+    if not os.path.isabs(vocal_file):
+        vocal_file = os.path.join(tmpdir, vocal_file)
+    return vocal_file
+
+
 def apply_vocal_extract_mdx(input_path: str, output_path: str,
-                              chunk_seconds: int = 15,
+                              segment_size: int = 0,
                               device: str = "cuda") -> None:
     """
     Vocal extraction using MDX Kim_Vocal_2 model via audio-separator.
     Equivalent to --ff_vocal_extract mdx_kim2 in Faster-Whisper-XXL.
+
+    segment_size counts STFT frames, not seconds. It used to be derived from a
+    duration (--mdx_chunk seconds * 44100 // 1024, so 646 by default) and
+    Kim_Vocal_2's graph does not accept that: every run died inside onnx2torch
+    with "The size of tensor a (160) must match the size of tensor b (161)",
+    which audio-separator caught and turned into an empty result. 0 leaves
+    audio-separator's own default in place, which is what the model ships with.
     """
     import tempfile
 
@@ -345,27 +439,23 @@ def apply_vocal_extract_mdx(input_path: str, output_path: str,
 
     tmpdir = tempfile.mkdtemp(prefix="whisp_carrier_mdx_")
     try:
-        sep = Separator(
-            output_dir=tmpdir,
-            mdx_params={
+        params = {"output_dir": tmpdir}
+        if segment_size:
+            params["mdx_params"] = {
                 "hop_length": 1024,
-                "segment_size": chunk_seconds * 44100 // 1024,
+                "segment_size": segment_size,
                 "overlap": 0.25,
                 "batch_size": 1,
                 "enable_denoise": False,
-            },
-        )
+            }
+        sep = Separator(**params)
         sep.load_model(model_filename="Kim_Vocal_2.onnx")
         stems = sep.separate(input_path)
+        vocal_file = _pick_vocal_stem(stems, tmpdir, "Kim_Vocal_2")
 
-        vocal_file = next(
-            (s for s in stems if "vocal" in os.path.basename(s).lower()),
-            stems[0]
-        )
-        if not os.path.isabs(vocal_file):
-            vocal_file = os.path.join(tmpdir, vocal_file)
-
-        extract_audio(vocal_file, output_path)
+        # The stem keeps its rate and layout here. preprocess() converts to
+        # 16kHz mono once, after this stage.
+        extract_track_native(vocal_file, output_path)
     finally:
         import shutil
         try:
@@ -390,17 +480,11 @@ def apply_vocal_extract_roformer(input_path: str, output_path: str,
         sep = Separator(output_dir=tmpdir)
         sep.load_model(model_filename="vocals_mel_band_roformer.ckpt")
         stems = sep.separate(input_path)
+        vocal_file = _pick_vocal_stem(stems, tmpdir, "mel_band_roformer")
 
-        # separate()はフルパスを返す場合とファイル名のみの場合がある
-        vocal_file = next(
-            (s for s in stems if "vocal" in os.path.basename(s).lower()),
-            stems[0]
-        )
-        # フルパスでなければtmpdirと結合
-        if not os.path.isabs(vocal_file):
-            vocal_file = os.path.join(tmpdir, vocal_file)
-
-        extract_audio(vocal_file, output_path)
+        # The stem keeps its rate and layout here. preprocess() converts to
+        # 16kHz mono once, after this stage.
+        extract_track_native(vocal_file, output_path)
     finally:
         import shutil
         try:
@@ -449,10 +533,57 @@ def preprocess(input_path: str, args) -> str:
     if requested:
         channel = requested[0]
 
+    source = input_path
+    source_track = getattr(args, "ff_track", 1)
+
+    # Vocal separation runs first, on the source rate and layout. It used to run
+    # last, which meant the separation models -- trained on 44.1kHz stereo --
+    # only ever saw audio already reduced to 16kHz mono, with everything above
+    # 8kHz and the whole stereo image discarded. Nothing downstream needs the
+    # original format, so the 16kHz mono conversion moves to just after this.
+    vocal_extract = getattr(args, "ff_vocal_extract", None)
+    if vocal_extract:
+        native = next_tmp()
+        extract_track_native(input_path, native, track=source_track)
+        native_state = measure(native)
+        print(_format_measurement("source", native_state), flush=True)
+        if native_state["peak_db"] <= SILENCE_PEAK_DB:
+            raise FilterStageError(
+                f"audio extraction produced silence "
+                f"(peak {_peak_str(native_state)}); track "
+                f"{source_track} of the source carries no audio."
+            )
+
+        separated = next_tmp()
+        label = f"vocal_extract:{vocal_extract}"
+        if vocal_extract == "mdx_kim2":
+            apply_vocal_extract_mdx(
+                native, separated,
+                segment_size=getattr(args, "mdx_chunk", 0),
+                device=getattr(args, "voc_device", "cuda"),
+            )
+        elif vocal_extract == "mb-roformer":
+            apply_vocal_extract_roformer(
+                native, separated,
+                device=getattr(args, "voc_device", "cuda"),
+            )
+        else:
+            raise FilterStageError(
+                f"unknown --ff_vocal_extract model {vocal_extract!r}; "
+                f"expected mdx_kim2 or mb-roformer"
+            )
+        separated_state = measure(separated)
+        print(_format_measurement(label, separated_state), flush=True)
+        verify_stage(label, native_state, separated_state)
+
+        # What the separator wrote is a single-track WAV, so the source track
+        # index no longer applies to it.
+        source, source_track = separated, 1
+
     current = next_tmp()
     extract_audio(
-        input_path, current,
-        track=getattr(args, "ff_track", 1),
+        source, current,
+        track=source_track,
         channel=channel,
     )
 
@@ -515,19 +646,6 @@ def preprocess(input_path: str, args) -> str:
     if ff_tempo and ff_tempo != 1.0:
         # Changing the length is what tempo does.
         stage("tempo", apply_tempo, tempo=ff_tempo, expect_duration=False)
-
-    vocal_extract = getattr(args, "ff_vocal_extract", None)
-    if vocal_extract == "mdx_kim2":
-        stage(
-            "vocal_extract:mdx_kim2", apply_vocal_extract_mdx,
-            chunk_seconds=getattr(args, "mdx_chunk", 15),
-            device=getattr(args, "voc_device", "cuda"),
-        )
-    elif vocal_extract == "mb-roformer":
-        stage(
-            "vocal_extract:mb-roformer", apply_vocal_extract_roformer,
-            device=getattr(args, "voc_device", "cuda"),
-        )
 
     # Clean up intermediate files (keep the final one)
     for f in tmp_files[:-1]:

@@ -155,6 +155,7 @@ def preload_bundled_cuda() -> List[str]:
 from faster_whisper import WhisperModel  # noqa: E402  (must follow the env var)
 from tqdm import tqdm
 
+import filler_filter
 import loop_filter
 import subtitle_format
 import whisp_config
@@ -268,6 +269,13 @@ VERSION = "0.9.2"
 # single default that would be wrong for whichever backend is not selected.
 # ─────────────────────────────────────────────
 VAD_THRESHOLD_DEFAULTS = {"ten": 0.75, "silero": 0.45}
+
+# Below this, an auto-detected language gets a warning on the [STT] line. It
+# gates a message only, never a decision. Correct detections on this material
+# ran 84.1-99.9%; the one recording that came out in the wrong language was at
+# 36.5%, so the two populations are far apart and the exact value is not
+# delicate. See the [STT] warning in process_single_file().
+LANGUAGE_CONFIDENCE_WARN = 0.70
 
 
 def resolve_vad_threshold(method: str) -> float:
@@ -622,6 +630,17 @@ def transcribe_file(
             "end": round(seg.end, 3),
             "text": seg.text,
         }
+        # Kept for observation, not used for any decision. These two are the
+        # only signal never measured against the stock-phrase problem: word
+        # probability and loudness were both measured not to separate it
+        # (測定結果 #20). no_speech_prob is reported on the [FILLER] line, so
+        # production logs accumulate the distribution that would decide whether
+        # it is usable. Note faster-whisper only discards on no_speech_prob when
+        # avg_logprob is also below its threshold, which is why both are here.
+        for field, value in (("no_speech_prob", getattr(seg, "no_speech_prob", None)),
+                             ("avg_logprob", getattr(seg, "avg_logprob", None))):
+            if value is not None:
+                entry[field] = round(float(value), 4)
         if args.word_timestamps and seg.words:
             entry["words"] = [
                 {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3), "probability": round(w.probability, 4)}
@@ -717,6 +736,28 @@ def process_single_file(
         # can be read as a ratio without opening the JSON.
         print(f"  [STT] Done in {elapsed:.1f}s | dur={info['duration']:.1f}s | lang={info['language']} ({info['language_probability']:.2%}) | {len(segments)} segments", flush=True)
 
+        # Say so when auto-detection was not confident. Whisper detects the
+        # language from the opening of the file, so an OP song or a sponsor
+        # credit can decide it for the whole recording -- and then every stock
+        # phrase, and part of the dialogue, comes out in the wrong language.
+        #
+        # Measured on the material here: 13 recordings that came out correct sat
+        # at 84.1-99.9%, and the one that failed sat at 36.5%
+        # (sample/errdata, ニワトリ・ファイター 第三羽: 115 segments where the same
+        # audio with -l ja gives 315). Anything in between separates them, so
+        # this is a log line and not a decision -- nothing is retried or
+        # overridden, because a genuinely multilingual file is legitimate.
+        if (not args.language
+                and info["language_probability"] < LANGUAGE_CONFIDENCE_WARN):
+            print(
+                f"  [STT] warning: language auto-detected as "
+                f"{info['language']} with low confidence "
+                f"({info['language_probability']:.2%}). Detection reads the "
+                f"start of the file, so an opening song or jingle can decide "
+                f"it. If the language is known, pass it: -l ja",
+                flush=True,
+            )
+
         # Drop segments that are one thing repeated. This runs before the
         # duration repair below because a loop never needs splitting, and
         # because the repair would otherwise turn one broken 30s cue into
@@ -743,6 +784,23 @@ def process_single_file(
                         f"{console_safe(text[:40])}",
                         flush=True,
                     )
+
+        # Drop the stock phrases Whisper emits over non-speech ("ご視聴ありがとう
+        # ございました"). Same position in the pipeline as the loop filter and for
+        # the same reason: no point repairing the duration of a cue that is about
+        # to go. Measured at 0.6 CER points on nine recordings, and worth more
+        # than that to a viewer, because these land on OP/ED/credits where the
+        # reference is empty and CER barely charges for them (測定結果 #20).
+        #
+        # Detection runs even when dropping is off. The residual risk is a genre
+        # where the phrase is really spoken, which this corpus cannot show, so
+        # the log has to carry the evidence either way.
+        filler_enabled = getattr(args, "filler_filter", True)
+        segments, filler_stats = filler_filter.filter_segments(
+            segments, drop=filler_enabled
+        )
+        for line in filler_filter.describe(filler_stats, enabled=filler_enabled):
+            print(console_safe(line), flush=True)
 
         # Repair segments that straddle a pause the VAD cut out of the waveform.
         # This runs whatever the formatting options are, because the damage is a
@@ -930,6 +988,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "keep them, for instance when a long scream is wanted "
                         "in the subtitle. Dropped segments are listed on the "
                         "[LOOP] line.")
+    p.add_argument("--filler_filter",
+                   type=lambda x: x.lower() != "false", default=True,
+                   help="Drop segments that are nothing but a stock closing "
+                        "phrase Whisper emits over non-speech, such as "
+                        "'ご視聴ありがとうございました' (measured: total CER 16.1%% -> "
+                        "15.5%% on nine recordings). The phrase must account for "
+                        "the whole segment, so dialogue containing it is kept. "
+                        "Pass false on material where such a line may really be "
+                        "spoken, for instance a variety show: detection still "
+                        "runs and every hit is listed on the [FILLER] line, so "
+                        "the log shows what would have been dropped.")
 
     # Batched inference
     p.add_argument("--batched", action="store_true",
@@ -969,9 +1038,13 @@ def build_parser() -> argparse.ArgumentParser:
                             "ten", "precomputed",
                             "pyannote_v3", "pyannote_onnx_v3",
                             "auditok", "webrtc"],
+                   # argparse runs every help string through `% params`, so a
+                   # literal percent has to be doubled. These four were single,
+                   # which made `--help` die with a raw traceback and exit 1 --
+                   # in the shipped 0.9.2 exe as well, since no test invokes it.
                    help="VAD backend. Defaults to 'ten' (TEN VAD, Apache-2.0), "
-                        "which beat silero on all nine references: 19.3% -> "
-                        "16.1% whole-region CER, coverage 82.6% -> 86.6%, and "
+                        "which beat silero on all nine references: 19.3%% -> "
+                        "16.1%% whole-region CER, coverage 82.6%% -> 86.6%%, and "
                         "it wins on eight of the nine files. Segmentation is "
                         "silero's aggregation either way, so only the model "
                         "differs. 'silero_v5' is the previous default. The *_fw "
@@ -1046,8 +1119,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ff_vocal_extract", default=None,
                    choices=["mdx_kim2", "mb-roformer"],
                    help="Vocal extraction model.")
-    p.add_argument("--mdx_chunk", type=int, default=15,
-                   help="Chunk size (seconds) for MDX vocal extraction.")
+    p.add_argument("--mdx_segment_size", "--mdx_chunk", dest="mdx_chunk",
+                   type=int, default=0,
+                   help="MDX segment size in STFT frames (0 = the model's own "
+                        "default). Not seconds: Kim_Vocal_2's graph fixes the "
+                        "frame count, and the old seconds-derived value never "
+                        "loaded.")
     p.add_argument("--voc_device", default="cuda",
                    help="Device for vocal extraction.")
 
@@ -1277,6 +1354,20 @@ def main() -> None:
         from faster_whisper import BatchedInferencePipeline
         engine = BatchedInferencePipeline(model=model)
         print(f"Batched inference enabled (batch_size={args.batch_size})", flush=True)
+
+    # A model published as CTranslate2 can carry alignment heads that name
+    # decoder layers it does not have, and CTranslate2 indexes that list during
+    # alignment, so --word_timestamps would take the process down with an access
+    # violation and no Python error. The repair inside convert() cannot reach
+    # these: nothing here converted them, and their config carries no decoder
+    # shape to check against. Runs after the model is built so the weight names
+    # can be read from the file that was actually loaded.
+    if args.word_timestamps:
+        guard = whisp_models.word_timestamp_guard(resolved.path, Path(model_dir))
+        if guard:
+            args.word_timestamps = False
+            for line in guard:
+                print(line, flush=True)
 
     # Process files.
     #

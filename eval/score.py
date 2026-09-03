@@ -29,6 +29,25 @@ Paired difference
     reference at all, so it covers the files with no scorable gap, and it gives a
     short list of timestamps to listen to rather than a number to trust.
 
+Reference-free anomalies
+    Four shapes that are wrong on their own terms, so they work on material with
+    no reference at all -- which is what a recording someone sends in looks like.
+
+        loops    one phrase or character repeated
+        over30s  longer than the decoder's window, so it cannot be real
+        thin     20 s or more holding under 1 char/s: a span with no text in it
+        dense    over 15 char/s and 20+ chars: more text than the span can hold
+
+    dense is the newest and the reason the set needed a fourth: 第三羽 (sample/
+    errdata, 測定結果 #25) had 42 of 111 cues impossible, 35 of them exactly
+    1.40 s while carrying up to 107 characters, and the other three detectors all
+    read zero on it. It scored as healthy while being visibly broken.
+
+    Read dense as "go and look", not as a defect to correct. On the one file where
+    it fired, the cause was language auto-detection choosing the wrong language,
+    and pinning it with -l ja took the count 42 -> 2, which is the corpus's own
+    base rate. The timestamps were a symptom; the language was the disease.
+
 Coverage and precision
     The CER split into its two failure modes, from the LCS of reference and
     hypothesis over the captioned region:
@@ -207,6 +226,24 @@ IMPOSSIBLE_DURATION = 30.0
 THIN_CHARS_PER_SECOND = 1.0
 THIN_MIN_DURATION = 20.0
 
+# The opposite shape, and the one nothing here used to look for: a cue holding
+# more text than anyone could speak in the span it claims. The text is usually
+# correct; the timestamps collapsed under it.
+#
+# Found on sample/errdata (ニワトリ・ファイター 第三羽, 測定結果 #25), where 42 of 111
+# cues were impossible -- 35 of them exactly 1.40 s long while carrying up to 107
+# characters. Every detector above passed that file: over30s 0, thin 0, loops 0
+# after suppression. It scored as healthy while being visibly broken.
+#
+# Thresholds from the corpus: median cue density runs 4.5-5.6 chars/s and p90 runs
+# 6.6-7.4, so 15 is roughly double the fastest normal cue. The character minimum
+# keeps a one-word cue with a rounded span out of it -- at 20 characters the span
+# would have to be under 1.3 s for real speech.
+DENSE_CHARS_PER_SECOND = 15.0
+DENSE_MIN_CHARS = 20
+# Below this a cue is too short to measure a rate from at all.
+DENSE_MIN_DURATION = 0.05
+
 LOOP_MIN_CHARS = 12
 LOOP_MAX_DISTINCT = 2
 LOOP_MIN_RUN = 8
@@ -261,7 +298,10 @@ class AnomalyScore:
     impossible: int = 0
     impossible_seconds: float = 0.0
     thin: int = 0
+    dense: int = 0
+    dense_chars: int = 0
     max_duration: float = 0.0
+    max_density: float = 0.0
     examples: List[Tuple[str, float, float, str]] = field(default_factory=list)
 
 
@@ -286,6 +326,22 @@ def score_anomalies(hypothesis: Hypothesis) -> AnomalyScore:
                 and len(text) / duration < THIN_CHARS_PER_SECOND):
             result.thin += 1
             result.examples.append(("thin", segment.start, segment.end, text))
+
+        # More text than the span can hold: the timestamps collapsed, not the
+        # text. Reported rather than repaired -- on the one file where this
+        # appeared, the cause was language auto-detection picking the wrong
+        # language, and pinning it with -l ja took the count from 42 to 2 (#25).
+        # So this is a signal to go and look, not something to correct in place.
+        if duration >= DENSE_MIN_DURATION and text:
+            density = len(text) / duration
+            result.max_density = max(result.max_density, density)
+            if density > DENSE_CHARS_PER_SECOND and len(text) >= DENSE_MIN_CHARS:
+                result.dense += 1
+                result.dense_chars += len(text)
+                result.examples.append(
+                    ("dense", segment.start, segment.end,
+                     f"{density:.0f}ch/s {text}")
+                )
     return result
 
 
@@ -693,18 +749,25 @@ def main() -> None:
                 f"    {short(name, 11):11} loops {anomaly.loops} "
                 f"({anomaly.loop_chars} chars) | >30s {anomaly.impossible} "
                 f"({anomaly.impossible_seconds:.0f}s) | thin {anomaly.thin} | "
-                f"longest {anomaly.max_duration:.0f}s"
+                f"dense {anomaly.dense} ({anomaly.dense_chars} chars) | "
+                f"longest {anomaly.max_duration:.0f}s | "
+                f"peak {anomaly.max_density:.0f}ch/s"
             )
             seen = 0
+            # Selected by kind, not by duration. The old test was
+            # `kind == "loop" or end - start > IMPOSSIBLE_DURATION`, which hid
+            # every dense cue -- dense is short by definition, so it could never
+            # clear a 30 second bar. The count printed and the timestamps did
+            # not, which defeats the point of a detector whose output is "go and
+            # look". It also hid thin cues between 20 and 30 seconds.
             for kind, start, end, text in anomaly.examples:
-                if kind == "loop" or end - start > IMPOSSIBLE_DURATION:
-                    lines.append(
-                        f"      {kind:8} {clock(start)}-{clock(end)} "
-                        f"{short(text, 46)}"
-                    )
-                    seen += 1
-                    if seen >= args.examples:
-                        break
+                lines.append(
+                    f"      {kind:8} {clock(start)}-{clock(end)} "
+                    f"{short(text, 46)}"
+                )
+                seen += 1
+                if seen >= args.examples:
+                    break
 
         # --- paired difference ---
         if len(names) >= 2:
@@ -792,7 +855,10 @@ def main() -> None:
             f"    {short(name, 11):11} {anomaly.segments} segments | "
             f"loops {anomaly.loops} ({anomaly.loop_chars} chars) | "
             f">30s {anomaly.impossible} ({anomaly.impossible_seconds:.0f}s) | "
-            f"thin {anomaly.thin} | longest {anomaly.max_duration:.0f}s"
+            f"thin {anomaly.thin} | "
+            f"dense {anomaly.dense} ({anomaly.dense_chars} chars) | "
+            f"longest {anomaly.max_duration:.0f}s | "
+            f"peak {anomaly.max_density:.0f}ch/s"
         )
     # Whole-region first: it is the number to lead with, because it does not
     # depend on how coarsely either side segments.
@@ -855,7 +921,10 @@ def accumulate_anomaly(total: AnomalyScore, part: AnomalyScore) -> None:
     total.impossible += part.impossible
     total.impossible_seconds += part.impossible_seconds
     total.thin += part.thin
+    total.dense += part.dense
+    total.dense_chars += part.dense_chars
     total.max_duration = max(total.max_duration, part.max_duration)
+    total.max_density = max(total.max_density, part.max_density)
 
 
 def accumulate_cer(total: normalize.CerResult, part: normalize.CerResult) -> None:
