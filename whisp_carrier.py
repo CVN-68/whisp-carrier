@@ -253,7 +253,7 @@ MEDIA_EXTENSIONS = {
     ".ts", ".m2ts", ".mts",
 }
 
-VERSION = "0.9.2"
+VERSION = "1.0.0"
 
 # ─────────────────────────────────────────────
 # Per-backend VAD threshold
@@ -1362,8 +1362,15 @@ def main() -> None:
     # these: nothing here converted them, and their config carries no decoder
     # shape to check against. Runs after the model is built so the weight names
     # can be read from the file that was actually loaded.
+    # model_dir is None whenever no _models directory sits next to the binary,
+    # which is the normal case for the exe: the script version finds the repo's
+    # _models/ and the exe looks inside _MEIPASS, where there is none. Path(None)
+    # raises TypeError, so wrapping it unconditionally crashed every default exe
+    # run while the script version was fine. Pass the download root through as
+    # it is; local_ct2_dir() already treats None as "faster-whisper's default".
     if args.word_timestamps:
-        guard = whisp_models.word_timestamp_guard(resolved.path, Path(model_dir))
+        guard = whisp_models.word_timestamp_guard(
+            resolved.path, Path(model_dir) if model_dir else None)
         if guard:
             args.word_timestamps = False
             for line in guard:

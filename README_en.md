@@ -22,10 +22,10 @@ exe cannot do is listed [below](#what-the-exe-build-cannot-do).
 - **Amatsukaze compatible** — same CLI interface as faster-whisper-xxl.exe
 - **Model aliases** — `-m anime-whisper` for Japanese anime dialogue; any Hugging Face
   Whisper fine-tune is converted to CTranslate2 on first use
-- **TEN VAD by default** (Apache-2.0) — measured better than silero on every one of
-  15 TV recordings: 19.3% -> 16.1% whole-region CER over nine 24-minute episodes and
-  31.1% -> 21.9% over four children's programmes. The built-in silero paths are still
-  selectable with `--vad_method`
+- **TEN VAD by default** (Apache-2.0) — 19.0% -> **15.5%** whole-region CER over nine
+  24-minute episodes and 30.8% -> **21.6%** over four children's programmes, better on
+  12 of the 13 files rescored under the same conditions. The built-in silero paths are
+  still selectable with `--vad_method`
 - **Hallucination loop prevention** — segments that are one phrase or character
   repeated are dropped, which measured 24.3% -> 22.0% CER against ARIB captions
   on nine TV recordings (measured under the silero default and the pre-fix scoring
@@ -265,7 +265,7 @@ in `HANDOVER.md`. Each of them says so when invoked rather than failing obscurel
 | `--ff_vocal_extract` | no | yes | `audio-separator` is not bundled. Bundling it packaged cleanly but failed at runtime inside scipy, reporting a broken scipy installation that was not broken |
 | `--realign` | no | yes | `stable-ts` is not in the default build; `WHISP_CARRIER_FULL=1` includes it. It is skipped anyway whenever subtitle formatting is on, which the recommended settings enable |
 | `--vad_method pyannote_v3` / `pyannote_onnx_v3` | no | no | `pyannote.audio` is excluded on purpose: it pulls in pytorch-lightning and speechbrain, and measured worse than the built-in silero VAD |
-| `--vad_method silero_v3` / `silero_v4` / `silero_v5` | no | yes | `torch` is not bundled as of 0.9.1. It was 4.27 GB on its own, and these backends lost to the default TEN VAD on all fifteen reference recordings. The built-in names (`silero_v5_fw`, `silero_v6_fw`) run through onnxruntime and still work in the exe |
+| `--vad_method silero_v3` / `silero_v4` / `silero_v5` | no | yes | `torch` is not bundled as of 0.9.1. It was 4.27 GB on its own, and these backends lost to the default TEN VAD on every material group measured. The built-in names (`silero_v5_fw`, `silero_v6_fw`) run through onnxruntime and still work in the exe |
 
 **None of this affects accuracy.** Every figure this project reports was measured
 without any `--ff_*` filter, on `large-v3`, through the default TEN VAD path,
@@ -300,19 +300,20 @@ settings on both sides, no audio filters, singing excluded from scoring.
 
 | Material | Files | Reference chars | whisp-carrier (default) | Faster-Whisper-XXL r245.4 |
 |---|---|---|---|---|
-| 24-minute episodes | 9 | 35,036 | **16.1%** | 20.5% |
-| Children's programmes | 4 | 16,704 | **21.9%** | 33.5% |
-| Marathon broadcast (5h22m) | 1 | 37,987 | **16.1%** | not measured |
-| Marathon broadcast (4h52m) | 1 | 50,255 | **14.1%** | not measured |
+| 24-minute episodes | 9 | 35,036 | **15.5%** | 20.5% |
+| Children's programmes | 4 | 16,704 | **21.6%** | 33.5% |
+| Marathon broadcast (5h22m) | 1 | 37,987 | **15.6%** | not measured |
+| Marathon broadcast (4h52m) | 1 | 50,255 | **13.8%** | not measured |
 
 Figures are whole-region CER (character error rate, lower is better).
-**No single number describes this.** Per file the spread is 8.7% to 30.5%,
-and it tracks the content: 8.7 to 14.0% for dialogue-driven shows,
-23 to 25% for children's programmes, 30.5% for the worst case
-(a series where speech covers only 23% of the runtime).
+**No single number describes this.** Per file the spread is 8.0% to 28.8%,
+and it tracks the content: 8.0 to 13.8% for dialogue-driven shows,
+22 to 25% for children's programmes, 28.8% for the worst case
+(a series where speech covers only 23% of the runtime). Episodes of the same
+series differ too: one scored 16.0% and another 26.7%.
 
 **The error is mostly missed speech rather than wrong text.** Over the nine
-episodes, 86.6% of the reference was recovered and 90.0% of the produced text
+episodes, 86.6% of the reference was recovered and 90.8% of the produced text
 matched it. The weaker files are not less precise, they output less.
 
 Structural differences, which matter more in practice for subtitles:
@@ -327,7 +328,7 @@ Structural differences, which matter more in practice for subtitles:
 | One 5h22m broadcast | 1214s (6.3% of runtime) | not measured |
 
 There is no degradation on long material: the two marathon broadcasts scored
-16.1% and **14.1%**, the latter being the best result across the whole corpus.
+15.6% and **13.8%**, the latter being the best result across the whole corpus.
 
 ### On RTX 50-series, running with no extra options is itself the difference
 
