@@ -10,6 +10,7 @@
 | 今どこにいるか・次に何をするか | **この文書** |
 | なぜそう作ったか・踏むと壊れる罠・eval の使い方 | [HANDOVER.md](HANDOVER.md) |
 | 測定結果・作業の記録・完了した項目 | [MEASUREMENTS.md](MEASUREMENTS.md) |
+| **それは測ってあるか**（#1〜#29 の一覧） | [MEASUREMENTS.md の索引](MEASUREMENTS.md#索引129) |
 | 利用者向けの説明と**精度の数値の出どころ** | [README.md](README.md) |
 
 **数値を引用するときは出典を確認すること。** 現行の基準値は下の表、

@@ -11,6 +11,7 @@ whisp-carrier の設計判断・既知の問題・検証環境をまとめたド
 | 今どこにいるか・次に何をするか | [STATUS.md](STATUS.md) |
 | なぜそう作ったか・踏むと壊れる罠・eval の使い方 | **この文書** |
 | 測定結果・作業の記録・完了した項目 | [MEASUREMENTS.md](MEASUREMENTS.md) |
+| **それは測ってあるか**（#1〜#29 の一覧） | [MEASUREMENTS.md の索引](MEASUREMENTS.md#索引129) |
 
 **数値はここに置かない。** 現行の基準値は [STATUS.md](STATUS.md)、
 測定の詳細は [MEASUREMENTS.md](MEASUREMENTS.md)、利用者向けは
