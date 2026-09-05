@@ -462,8 +462,11 @@ by not bundling PyTorch: inference runs on CTranslate2 and the default VAD is a
 native library, so neither used it. Output is unchanged — byte for byte identical
 to 0.9.0 on the same audio.
 
-Inspired by [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win) (Purfview) — a proprietary Whisper CLI with RTX 5090 support.  
-whisp-carrier reimplements equivalent functionality using only open-source components.
+Inspired by [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win) (Purfview), a
+closed-source Whisper CLI. Its free build (r245.4) does not run on an RTX 5090 at its defaults --
+`-ct float32` makes it work but runs about twice as slow as float16 -- and the Pro build that carries
+the 50-series support is a non-public version for donators of £50 or more. whisp-carrier
+reimplements equivalent functionality using only open-source components.
 
 ## License
 

@@ -11,7 +11,9 @@ exe でできないことは[exe版とスクリプト版の違い](#exe版とス
 
 ## 経緯
 
-Faster-Whisper-XXL Pro は RTX 5090 対応版が有料（£50寄付）かつソース非公開だったため、
+**Faster-Whisper-XXL の無料版（r245.4）は RTX 5090 で既定のまま動かず**
+（`-ct float32` を明示すれば動きますが float16 の約2倍遅くなります）、
+**50番台対応が入っている上位版の Pro は £50 以上の寄付者向けでソース非公開**だったため、
 同等機能を持つオープンソース版を自作しました。
 
 ## 特徴
@@ -574,7 +576,7 @@ CTranslate2 が実際に読み込むもの（cuBLAS・cuDNN・NVRTC・nvJitLink�
 cuFFT / cuRAND / cuSOLVER / cuSPARSE は 0.9.1 で外しました**（torch が使っていた
 だけのため）。再配布条件は THIRD-PARTY-NOTICES.md に記載しています。
 
-開発のきっかけ：[Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)（Purfview作）のRTX 5090対応版が有料かつソース非公開だったため、同等機能をオープンソースのみで再実装したもの。
+開発のきっかけ：[Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)（Purfview作）の無料版が RTX 5090 で既定のまま動かず、50番台対応が入っている上位版の Pro は £50 以上の寄付者向けでソース非公開だったため、同等機能をオープンソースのみで再実装したもの。
 
 ## オプション一覧
 
