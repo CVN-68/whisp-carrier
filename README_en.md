@@ -243,14 +243,31 @@ removes wanted captions.
 If lyrics are unwanted, deleting the cues for those time ranges afterwards is
 the reliable route. The `[VAD]` log lines are the signal to look at.
 
-For the same reason, **stock phrases such as 「ご視聴ありがとうございました」
-("thank you for watching") occasionally appear over silence.** Whisper emits
-high-frequency training phrases against non-speech, and Faster-Whisper-XXL does
-the same (11 occurrences against this implementation's 43 over the same nine
-references). No filter for them is shipped, deliberately: **removing 0.3 to
-0.6 points of CER is not worth a mechanism that could delete a real line spoken
-by an in-universe broadcaster or streamer.** Measurement #20 in
-[MEASUREMENTS.md](MEASUREMENTS.md) has the details.
+Separately from singing, **Whisper emits stock closing phrases such as
+「ご視聴ありがとうございました」("thank you for watching") over non-speech.** It is
+the model producing a high-frequency training phrase against silence, and
+Faster-Whisper-XXL does it too. The result is a subtitle line landing on the
+opening, the ending, the sponsor credits or a trailer. Broadcast captions are
+empty there, so it barely shows in CER and is completely visible on screen.
+
+**These are dropped by default** (`--filler_filter`, default `true`). A segment is
+discarded only when the phrase accounts for the whole of it; **partial matches are
+left alone**, because those take real dialogue with them. Detection always runs and
+every hit is logged, so turning the filter off still tells you what matched.
+Over nine 24-minute episodes: 16.1% to 15.5%, better on 14 of 15 files, no
+regressions, and zero false positives across 11,967 reference cues.
+
+> **Take care if you record variety shows or drama.** A host may genuinely say
+> "thank you for watching" to close the programme, which is exactly where this
+> fires. Pass `--filler_filter false` if that matters to you.
+> **The default was decided on fifteen Japanese TV anime recordings and has not
+> been measured on any other genre.**
+
+Measurements
+[#20](MEASUREMENTS.md#20-定型句フィルタは-06pt-効くが見送った) (the decision to skip it)
+and [#26](MEASUREMENTS.md#26-定型句フィルタを実装した20-の見送りを撤回2026-09-02)
+(reversing that and implementing it) in
+[MEASUREMENTS.md](MEASUREMENTS.md) have the details.
 
 ## What the exe build cannot do
 
