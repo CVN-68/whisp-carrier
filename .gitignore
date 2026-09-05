@@ -42,10 +42,12 @@ _models/
 *.bin
 *.pt
 
-# Temp files
+# Temp files. No trailing slash: throwaway probes get written as _tmp_foo.py /
+# _tmp_foo.log at the repo root too, and "_tmp*/" only matched directories, so
+# those showed up as untracked and looked committable.
 *.tmp
 *.bak
-_tmp*/
+_tmp*
 
 # Test files
 make_test_audio.py
@@ -53,7 +55,17 @@ test.wav
 test_speech.wav
 test_speech.srt
 
-# Evaluation material and results (large, and the source is recorded broadcast)
+# Evaluation material and results.
+#
+# Do not commit these even though MEASUREMENTS.md cites _eval/score-*.txt by
+# name throughout. Those reports are not just numbers: the example spans quote
+# the broadcaster's caption text and the recognised dialogue verbatim, and the
+# file stems are broadcast datetime ids. Publishing them would publish the
+# recordings' contents, and invite requests for material that cannot be shared.
+#
+# The cost is accepted deliberately: the cited reports do not reach anyone else,
+# so the figures in MEASUREMENTS.md cannot be independently verified. That is a
+# property of the source material, not an oversight.
 _eval/
 sample/
 
