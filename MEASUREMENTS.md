@@ -191,7 +191,8 @@ Apache-2.0 の LICENSE が付かない成果物になった。この wheel は
 
 #### リリース前チェックリスト16項目の結果
 
-**全項目通った。** 項目14の後半（リリース後にアセットの digest と照合）だけが公開後の作業。
+**全項目通った。** 項目14の後半（リリース後にアセットの digest と照合）も
+**公開後に確認して一致した**ので、**16項目すべてが閉じている。**
 
 | # | 項目 | 結果 |
 |---|------|------|
@@ -209,7 +210,7 @@ Apache-2.0 の LICENSE が付かない成果物になった。この wheel は
 | 11 | 生きた設定の保全 | MD5 `399D11649E65FF7102DAE603ECBD7ECD` がビルド前後・パック前後で不変 |
 | 12 | アーカイブ | `7z t` が `Everything is Ok`。**一覧の yaml は `.example` 1件だけ** |
 | 13 | 同梱 docs | README / THIRD-PARTY-NOTICES がソースとバイト一致 |
-| 14 | SHA-256 | 上記。**アセット digest との照合は公開後** |
+| 14 | SHA-256 | 上記。**公開後にリリースのアセット digest と一致を確認済み**（`sha256:52e84e78…`。GitHub 側は小文字表記） |
 | 15 | `--help` | exit 0・15,905 バイト・`--filler_filter` と `--vad_method` が出る |
 | 16 | `-m kotoba-v2` | exit 0・**`[MODEL] word timestamps disabled: alignment heads name decoder layer 25 but this model has 2.`** が出て転写も完了（2セグメント） |
 
