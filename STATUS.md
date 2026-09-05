@@ -183,8 +183,11 @@ c89ea96                  sm_120 訂正が送付済みであることの記録   
 # 1. 未 push 8コミット
 git push origin main
 
-# 2. 1.0.0 のタグ。配布した exe のコード状態を指す
-git tag v1.0.0 998798a
+# 2. 1.0.0 のタグ。main の HEAD に打つ
+#    exe のコード状態は 998798a で、HEAD との差は記録の追記だけ。
+#    HEAD に打つのは 0.9.2 でローカルと remote がずれたのと同じ轍を踏まないため
+#    （gh release create はタグが無ければ既定ブランチの HEAD に作る）
+git tag v1.0.0
 git push origin v1.0.0
 
 # 3. ずれている 0.9.2 のローカルタグを remote に合わせる（差分は spec のコメントだけ）
