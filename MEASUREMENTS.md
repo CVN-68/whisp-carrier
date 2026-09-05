@@ -168,6 +168,62 @@ Apache-2.0 の LICENSE が付かない成果物になった。この wheel は
 `SPEECH_SECONDS_PER_CHAR = 1.2`（p95）、`MIN = 2.0`、`MAX = 20.0`（`min_gap` と同値）。
 分布は `_eval/_cue_length.txt`。
 
+### 1.0.0 のビルドと配布アーカイブ（2026-09-03・7〜8回目）
+
+**2回ビルドしている。1回目は[既定の実行が全部落ちた](#100-の初回ビルドが既定の実行で全部落ちたpathnone2026-09-03)**
+（`Path(None)`）。**以下は2回目＝配布するぶんの記録。**
+コード状態は `998798a`。
+
+| | 値 |
+|---|---|
+| exe | **13,899,921 バイト**（0.9.2 は 13,887,994。**落ちた1回目のビルドは 13,899,906 で別物**） |
+| payload | **`_internal` 816ファイル・2226 MB**／`whisp-carrier` 全体 2239 MB。`_internal/torch` は無し |
+| アーカイブ | **`whisp-carrier-1.0.0.7z`・1,055,056,170 バイト（1007 MiB・単一ファイル）** |
+| **SHA-256** | **`6494C638419B76FC6A43A103C7EF3309C4F295646570850E167C09791226AC29`** |
+| アーカイブ内 | 169 folders / 824 files / 展開後 2,348,067,317 バイト。`7z t` が `Everything is Ok` |
+| 同梱 yaml | **`.example`（10,967 バイト）だけ。生きた設定は入っていない** |
+| 同梱 docs | `README.md` 52,980 バイト・`THIRD-PARTY-NOTICES.md` 17,403 バイト。**どちらもソースとバイト一致** |
+
+#### リリース前チェックリスト16項目の結果
+
+**全項目通った。** 項目14の後半（リリース後にアセットの digest と照合）だけが公開後の作業。
+
+| # | 項目 | 結果 |
+|---|------|------|
+| 1 | ビルドログ | `BUILD_EXIT=0` / `[spec] default (slim)` / `ffmpeg verified (known LGPL build): n8.1.2-44-g7c533d0f86-20260820` / `keeping 13 CUDA libraries (1870 MB), dropping 2403 MB of torch` / `dropped 3 duplicate torch/lib binaries (766 MB)` |
+| 2 | `--version` | `whisp-carrier 1.0.0 \| ctranslate2 4.8.1 \| torch not bundled \| CUDA: True` |
+| 3 | payload / `_internal/torch` | 2226 MB / 無し |
+| **4** | **出力の回帰** | **SRT `AE21834629D4762F0BCD2405E102D1DB` / VTT `6A6791FD97DE025C91A202223185C868` が記録値と完全一致。この項目が `Path(None)` を捕まえた** |
+| 5 | PATH から ffmpeg を抜いて AAC | exit 0・字幕生成・**stderr 空**（抜いたのは `...\WinGet\Links`） |
+| 6 | 偽 `CUDA_PATH` | exit 0・`[CUDA] ignoring CUDA_PATH`・転写完了 |
+| 7 | 同上 `=off` | **exit 1・`Library cublas64_12.dll is not found or cannot be loaded`**（N と同一） |
+| 7b | 同上 `=preload` | exit 0・`ignoring CUDA_PATH` は出ない（層2単独で救えることの確認） |
+| 8 | ロードされた DLL のフルパス | **cuBLAS 2本とも `_internal` 由来**（181モジュール、0.9.2 と同数）。cuDNN は `_internal\ctranslate2\cudnn64_9.dll`（266KB のディスパッチャ）だけ |
+| 9 | `--device cpu` | exit 0・**cuBLAS が1つもロードされない**（ピン留めを払っていない） |
+| 10 | `silero_v5` / `silero_v5_fw` | 前者 exit 1 で代替名を表示、後者 exit 0 |
+| 11 | 生きた設定の保全 | MD5 `399D11649E65FF7102DAE603ECBD7ECD` がビルド前後・パック前後で不変 |
+| 12 | アーカイブ | `7z t` が `Everything is Ok`。**一覧の yaml は `.example` 1件だけ** |
+| 13 | 同梱 docs | README / THIRD-PARTY-NOTICES がソースとバイト一致 |
+| 14 | SHA-256 | 上記。**アセット digest との照合は公開後** |
+| 15 | `--help` | exit 0・15,905 バイト・`--filler_filter` と `--vad_method` が出る |
+| 16 | `-m kotoba-v2` | exit 0・**`[MODEL] word timestamps disabled: alignment heads name decoder layer 25 but this model has 2.`** が出て転写も完了（2セグメント） |
+
+#### 項目7が1回「通ってしまった」（テスト側の不備・チェックリストを直した）
+
+**`CUDA_PATH` を偽装しただけでは項目7が exit 0 になる。**
+**この開発機は PATH に `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin` があり**、
+`CUDA_PATH` が的外れで探索が PATH まで落ちたときに
+**本物の `cublas64_12.dll` がそこで見つかる。**
+
+**[N の表](#n-cuda_path-が同梱の-cublas-を隠していた2026-08-24-報告092-で修正)の
+「PATH の toolkit」列が失敗行で「なし」なのはこのため**だが、
+**チェックリスト側に書いていなかった。**
+[項目6に追記し、項目7bも表に足した](HANDOVER.md#リリース前チェックリストexe-を作り直したら回す)。
+
+**教訓は項目7の読み方。あれは「失敗できることの確認」で、
+成功したら直った証拠ではなく、測定になっていない証拠。**
+**否定的確認を項目として持つなら、通ったときの意味を項目自身に書いておくこと。**
+
 ### 配布アーカイブ 0.9.1（単一ファイルになった・2026-08-23）
 
 **[K](#k-torch-を外して配布サイズを削る2026-08-23) で torch を外した結果、分割が不要になった。**
