@@ -476,7 +476,12 @@ ARIB が字幕化する呻き・笑い・叫びで、**調整では動かない�
   別のことで、後者は `Get-Process` の `.Modules` でフルパスを見るまで確認できない。
 - **`sample/`（録画物）と `_eval/` はコミットしないこと。** `.gitignore` 済み。
   `build/` `dist/` `build-full/` `dist-full/` `_models/` `_tmp*/` も同様。
-  `_tools/` は三段構成で `_tools/ffmpeg/PROVENANCE.txt` だけを追跡している。
+  **`_tools/` はバイナリを無視して `PROVENANCE.txt` だけを追跡する。**
+  `.gitignore` は「ディレクトリを再包含 → 中身を無視 → 1ファイルだけ再包含」の
+  三段構成を**サブディレクトリごとに**書く必要があり、現在は
+  **`ffmpeg/` と `rnnoise/` の2つ**（`_tools/ffmpeg/PROVENANCE.txt` と
+  `_tools/rnnoise/PROVENANCE.txt`）。**`_tools/` に何か足したら三段を書き足すこと** —
+  書かないと `_tools/*` に飲まれて出所の記録が残らない。
 
 ---
 
@@ -510,6 +515,8 @@ README.md                ← 日本語・利用者向けマニュアル（exe �
 README_en.md             ← 上の英語版（要約）
 THIRD-PARTY-NOTICES.md   ← 同梱物の一覧（出典・ライセンス）。配布物にも入る
 _tools/ffmpeg/PROVENANCE.txt ← 同梱ffmpegの出所と検証記録（バイナリは非追跡）
+_tools/rnnoise/PROVENANCE.txt ← sh.rnnn の出所と「同梱しない」根拠（測定結果 #23）。
+                           バイナリは非追跡で、モデルは配布物に入っていない
 
 eval/                    ← 精度検証用。CLI本体からは独立、exeには入らない
   ext_vad_dump.py        ← 主環境に入れられないVADを別venvで走らせ区間をJSONに出す
